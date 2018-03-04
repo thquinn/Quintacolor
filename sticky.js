@@ -150,7 +150,8 @@ class Piece {
 
 function loop() {
 	window.requestAnimationFrame(loop);
-	ctx.clearRect(0, 0, canvas.width, canvas.height);
+	ctx.fillStyle = "#FFFFFF";
+	ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 	if (state == StateEnum.RUNNING) {
 		// Spawn pieces.
@@ -223,8 +224,9 @@ function selectCheck(e) {
 	if (selected.length == COLORS.length) {
 		return;
 	}
-	var x = Math.floor(e.clientX / PIECE_SIZE);
-	var y = Math.floor(e.clientY / PIECE_SIZE);
+	var mouse = mousePos(canvas, e);
+	var x = Math.floor(mouse.x / PIECE_SIZE);
+	var y = Math.floor(mouse.y / PIECE_SIZE);
 	if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT)
 		return;
 	if (board[x][y] == null || board[x][y].fallDistance > 0) {
