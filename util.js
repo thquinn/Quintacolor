@@ -1,3 +1,30 @@
+Math.precisionRound = function (number, precision) {
+  var factor = Math.pow(10, precision);
+  return Math.round(number * factor) / factor;
+}
+
+Math.lerp = function (value1, value2, amount) {
+  amount = amount < 0 ? 0 : amount;
+  amount = amount > 1 ? 1 : amount;
+  return value1 + (value2 - value1) * amount;
+};
+
+Math.randInt = function (min, max) {
+	return Math.floor(Math.random() * (max - min)) + min;
+};
+
+Math.pickFromWeightArray = function (arr) {
+  var total = arr.reduce((a, b) => a + b, 0);
+  var selector = Math.random() * total;
+  for (var i = 0; i < arr.length; i++) {
+    if (selector <= arr[i]) {
+      return i;
+    }
+    selector -= arr[i];
+  }
+  return -1;
+};
+
 Array.equal = function (a, b) {
   if (a === b) return true;
   if (a == null || b == null) return false;
@@ -12,15 +39,11 @@ Array.equal = function (a, b) {
   return true;
 }
 Array.containsArray = function (a, b) {
-	for (var i = 0; i < a.length; ++i) {
-    	if (Array.equal(a[i], b)) return true;
-	}
-	return false;
+  for (var i = 0; i < a.length; ++i) {
+      if (Array.equal(a[i], b)) return true;
+  }
+  return false;
 }
-
-Math.randInt = function (min, max) {
-	return Math.floor(Math.random() * (max - min)) + min;
-};
 
 function mousePos(el, e) {
   var xPosition = 0;

@@ -1,50 +1,110 @@
 var StateEnum = {
-  RUNNING: 1,
-  GAME_OVER: 2,
+	SETUP: -1,
+	RUNNING: 0,
+	GAME_OVER: 1,
+};
+var KeyBindings = {
+	INCREASE_LEVEL: 32,
 };
 var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
+// Board appearance constants.
 var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF' ]
+var BASE_COLOR = '#606080';
+var SELECTION_OPACITY = .5;
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
 var PIECE_SIZE = 60;
 var STROKE_WIDTH = 10;
-var INITIAL_FALL_VELOCITY = .05;
-var GRAVITY = .003;
-var SPAWN_RATE = 45;
-var CONNECTION_RATE = .0025;
-var CONNECTION_APPEARANCE_RATE = .075;
+var BOARD_PADDING = PIECE_SIZE;
+var CONNECTION_APPEARANCE_RATE = .1;
+var SETUP_SPAWN_RATE = 1; // frames per piece
+var POST_SETUP_PAUSE = 60;
+// UI appearance constants.
+var UI_WIDTH = PIECE_SIZE * 8;
+var UI_SCORE_DIGITS = 10;
+var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
+// Gameplay constants.
+var SETUP_ROWS = 4;
+var COLUMN_SELECTION_WEIGHT_EXPONENT = 3;
+var COLOR_SELECTION_WEIGHT_MIN = 10;
+var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
+var INITIAL_FALL_VELOCITY = .025;
+var GRAVITY = .006;
+var LEVEL_RATE = 30 * 60; // 30 seconds
+var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
+var SPAWN_RATE_INCREMENT = .15;
+var MULTIPLIER_INCREMENT = .1;
+var MULTIPLIER_FORCE_INCREMENT = .15;
+var LEVEL_UP_FORCE_COOLDOWN = 1 * 60; // 1 second
+var CONNECTION_RATE = .0075;
 
 var canvas = document.getElementById('canvas');
-canvas.width = BOARD_WIDTH * PIECE_SIZE;
-canvas.height = BOARD_HEIGHT * PIECE_SIZE;
+canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
+canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 var ctx = canvas.getContext('2d');
 ctx.lineWidth = STROKE_WIDTH;
-ctx.textAlign="center";
+ctx.textBaseline = 'middle';
 
-var state = StateEnum.RUNNING;
+var clock = 0;
+var state = StateEnum.SETUP;
 var board = new Array(BOARD_WIDTH);
 for (var i = 0; i < BOARD_WIDTH; i++) {
 	board[i] = new Array(BOARD_HEIGHT);
 }
+var keysPressed = new Set();
+var keysDown = new Set();
+var levelTimer = LEVEL_RATE;
+var levelUpForceCooldown = 0;
 var spawnTimer = 0;
 var selected = [];
+var level = 0;
+var score = 0;
+var multiplier = 1;
+var spawnBlocked = false;
 
 class Piece {
-	constructor() {
-		// TODO: color and column balancing
-		this.color = Math.randInt(0, COLORS.length);
-		do {
-			this.x = Math.randInt(0, BOARD_WIDTH);
-		} while (board[this.x][0] != null)
+	constructor(col) {
+		if (spawnBlocked) {
+			return;
+		}
+		// Select column.
+		if (col == null) {
+			var xWeights = new Array(BOARD_WIDTH).fill(0);
+			for (var x = 0; x < BOARD_WIDTH; x++) {
+				for (; xWeights[x] < BOARD_HEIGHT; xWeights[x]++) {
+					if (board[x][xWeights[x]] != null) {
+						break;
+					}
+				}
+				xWeights[x] = Math.pow(xWeights[x], COLUMN_SELECTION_WEIGHT_EXPONENT);
+			}
+			this.x = Math.pickFromWeightArray(xWeights);
+		} else {
+			this.x = col;
+		}
 		this.y = 0;
-		while (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] == null) {
+		while (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] == null) { // TODO: fix this ugly thing
 			this.y++;
 		}
+		// Select color.
+		var colorWeights = new Array(COLORS.length).fill(COLOR_SELECTION_WEIGHT_MIN);
+		for (var x = 0; x < BOARD_WIDTH; x++) {
+			for (var y = 0; y < BOARD_WIDTH; y++) {
+				if (board[x][y] != null) {
+					colorWeights[board[x][y].color]++;
+				}
+			}
+		}
+		for (var i = 0; i < colorWeights.length; i++) {
+			colorWeights[i] = 1 / Math.pow(colorWeights[i], COLOR_SELECTION_WEIGHT_EXPONENT);
+		}
+		this.color = Math.pickFromWeightArray(colorWeights);
+		// Initialize.
 		board[this.x][this.y] = this;
 		this.dy = INITIAL_FALL_VELOCITY;
-		this.fallDistance = this.y + 1;
+		this.fallDistance = this.y + 1 + BOARD_PADDING / PIECE_SIZE;
 		this.connection = [0, 0, 0, 0];
 		this.connectionAppearance = [0, 0, 0, 0];
 		this.root = this;
@@ -59,7 +119,7 @@ class Piece {
 		}
 	}
 
-	update() {
+	update(setup) {
 		if (this.fallDistance > 0) {
 			this.dy += GRAVITY;
 			var distanceToLowerNeighbor = Number.MAX_SAFE_INTEGER;
@@ -74,6 +134,9 @@ class Piece {
 			this.fallDistance -= fall;
 		} else {
 			this.dy = 0;
+		}
+		if (setup) {
+			return;
 		}
 
 		// Update connections and connection appearances.
@@ -112,18 +175,18 @@ class Piece {
 		var trueY = this.y - this.fallDistance;
 		// Stroke.
 		ctx.fillStyle = STROKE_COLORS[this.color];
-		ctx.fillRect(this.x * PIECE_SIZE, trueY * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE, trueY * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
 		// Horizontal fill.
 		ctx.fillStyle = COLORS[this.color];
-		ctx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]), trueY * PIECE_SIZE + STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
+		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]), trueY * PIECE_SIZE + STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
 		// Vertical fill.
 		ctx.fillStyle = COLORS[this.color];
-		ctx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]), PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
+		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]), PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
 		// Selection overlay.
 		for (let s of selected) {
 			if (board[s[0]][s[1]].root == this.root) {
-				ctx.fillStyle = "rgba(255, 255, 255, 0.75)";
-				ctx.fillRect(this.x * PIECE_SIZE, (this.y - this.fallDistance) * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+				ctx.fillStyle = "rgba(255, 255, 255, " + SELECTION_OPACITY + ")";
+				ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE, (this.y - this.fallDistance) * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
 				break;
 			}
 		}
@@ -137,12 +200,27 @@ class Piece {
 
 function loop() {
 	window.requestAnimationFrame(loop);
-	ctx.fillStyle = "#FFFFFF";
+	ctx.fillStyle = "#D0E8FF";
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+	// Setup.
+	if (state == StateEnum.SETUP) {
+		if (clock % SETUP_SPAWN_RATE == 0) {
+			var pieceNum = clock / SETUP_SPAWN_RATE;
+			if (pieceNum < SETUP_ROWS * BOARD_WIDTH) {
+				var x = pieceNum % BOARD_WIDTH;
+				new Piece(x);
+			}
+		}
+		if (clock == SETUP_ROWS * BOARD_WIDTH * SETUP_SPAWN_RATE + POST_SETUP_PAUSE) {
+			state = StateEnum.RUNNING;
+		}
+	}
+
+	clock++;
 	// Game over check.
 	if (state == StateEnum.RUNNING) {
-		var spawnBlocked = true;
+		spawnBlocked = true;
 		var gameOver = true;
 		for (var x = 0; x < BOARD_WIDTH; x++) {
 			if (board[x][0] == null) {
@@ -157,29 +235,47 @@ function loop() {
 		}
 	}
 
-	// Update everything.
-	if (state == StateEnum.RUNNING) {
-		// Spawn pieces.
-		// TODO: Gradual speedup.
-		// TODO: Speedup button.
-		if (spawnTimer == 0) {
-			if (!spawnBlocked) {
-				new Piece();
-				spawnTimer = SPAWN_RATE;
-			}
-		} else {
-			spawnTimer--;
-		}
-		// Update pieces.	
+	// Update pieces.	
+	if (state == StateEnum.SETUP || state == StateEnum.RUNNING) {
 		for (var x = 0; x < BOARD_WIDTH; x++) {
 			for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
 				if (board[x][y] == null) {
 					continue;
 				}
-				board[x][y].update();
+				board[x][y].update(state == StateEnum.SETUP);
 			}
 		}
 	}
+	// Update everything else.
+	if (state == StateEnum.RUNNING) {
+		// Level up.
+		if (levelUpForceCooldown > 0) {
+			levelUpForceCooldown--;
+		}
+		levelTimer--;
+		if (levelTimer == 0) {
+			level++;
+			multiplier += MULTIPLIER_INCREMENT;
+			levelTimer = LEVEL_RATE;
+		} else if (keysPressed.has(KeyBindings.INCREASE_LEVEL) && levelUpForceCooldown == 0) {
+			level++;
+			var add = Math.precisionRound(Math.lerp(MULTIPLIER_INCREMENT, MULTIPLIER_FORCE_INCREMENT, levelTimer / LEVEL_RATE), 2);
+			multiplier = Math.precisionRound(multiplier + add, 2);
+			levelUpForceCooldown = LEVEL_UP_FORCE_COOLDOWN;
+			levelTimer = LEVEL_RATE;
+		}
+		// Spawn pieces.
+		if (spawnTimer <= 0) {
+			if (!spawnBlocked) {
+				new Piece();
+				var rate = SPAWN_RATE_INITIAL + level * SPAWN_RATE_INCREMENT;
+				spawnTimer += 60 / rate;
+			}
+		} else {
+			spawnTimer--;
+		}
+	}
+	
 	// Draw pieces.
 	for (var x = 0; x < BOARD_WIDTH; x++) {
 		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
@@ -189,13 +285,34 @@ function loop() {
 			board[x][y].draw();
 		}
 	}
+	// Draw base.
+	var baseY = BOARD_HEIGHT * PIECE_SIZE;
+	ctx.fillStyle = BASE_COLOR;
+	ctx.fillRect(BOARD_PADDING, baseY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY);
+	// Draw UI.
+	ctx.textAlign= 'right';
+	ctx.fillStyle = "#FFFFFF";
+	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
+	ctx.fillText(score, canvas.width - BOARD_PADDING, canvas.height / 2);
+	var leadingZeroes = UI_SCORE_DIGITS - score.toString().length;
+	var scoreWidth = ctx.measureText(score).width;
+	ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
+	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
+	ctx.fillStyle = "#9090F0";
+	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+	ctx.fillText('Level: ' + level + '        Multiplier: ' + Math.round(multiplier * 100) + '%', canvas.width - BOARD_PADDING, canvas.height * .5625);
+	// Draw game over?
 	if (state == StateEnum.GAME_OVER) {
+		ctx.textAlign= 'center';
 		ctx.fillStyle = "#000000";
-		ctx.font = "100px Arial";
+		ctx.font = "bold 100px Source Sans Pro";
 		ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 3);
-		ctx.font = "48px Arial";
+		ctx.font = "48px Source Sans Pro";
 		ctx.fillText("refresh the window to play again", canvas.width / 2, canvas.height / 2);
 	}
+
+	// Update key states.
+	keysPressed.clear();
 }
 
 var moused = [];
@@ -215,7 +332,7 @@ canvas.addEventListener('mousemove', function(e) {
 		selectCheck(e);
 	}
 });
-document.addEventListener('mouseup', function(e) {
+window.addEventListener('mouseup', function(e) {
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
@@ -226,9 +343,10 @@ document.addEventListener('mouseup', function(e) {
 	if (colorCheck.size == 0) {
 		var toDestroy = new Set();
 		for (var i = 0; i < selected.length; i++) {
-			toDestroy.add(board[selected[i][0]][selected[i][1]]);
+			toDestroy.add(board[selected[i][0]][selected[i][1]].root);
 		}
 		for (let item of toDestroy) {
+			score = Math.round(score + item.children.size * 100 * multiplier);
 			item.destroy();
 		}
 		fallCheck(); // TODO: Add this to the main loop to prevent race conditions.
@@ -237,12 +355,20 @@ document.addEventListener('mouseup', function(e) {
 	selected = [];
 	mouseDown = false;
 });
+window.addEventListener('keydown', function(e) {
+	keysPressed.add(e.keyCode);
+	keysDown.add(e.keyCode);
+});
+window.addEventListener('keyup', function(e) {
+	keysDown.delete(e.keyCode);
+});
+
 function selectCheck(e) {
 	if (selected.length == COLORS.length) {
 		return;
 	}
 	var mouse = mousePos(canvas, e);
-	var x = Math.floor(mouse.x / PIECE_SIZE);
+	var x = Math.floor((mouse.x - BOARD_PADDING) / PIECE_SIZE);
 	var y = Math.floor(mouse.y / PIECE_SIZE);
 	if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT)
 		return;
@@ -250,8 +376,12 @@ function selectCheck(e) {
 		return;
 	}
 	var coor = [x, y];
+	// TODO: Allow crossing over multiple pieces in a single frame.
 	if (selected.length > 0) {
 		var last = selected[selected.length - 1];
+		if (board[last[0]][last[1]].root == board[x][y].root) {
+			return;
+		}
 		var d = Math.abs(last[0] - x) + Math.abs(last[1] - y);
 		if (d != 1) {
 			return;
