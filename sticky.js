@@ -8,8 +8,8 @@ var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF' ]
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
-var PIECE_SIZE = 80;
-var STROKE_WIDTH = 12;
+var PIECE_SIZE = 60;
+var STROKE_WIDTH = 10;
 var INITIAL_FALL_VELOCITY = .05;
 var GRAVITY = .003;
 var SPAWN_RATE = 45;
@@ -33,18 +33,6 @@ var selected = [];
 
 class Piece {
 	constructor() {
-		// Check for game over.
-		var gameOver = true;
-		for (var x = 0; x < BOARD_WIDTH; x++) {
-			if (board[x][0] == null) {
-				gameOver = false;
-				break;
-			}
-		}
-		if (gameOver) {
-			state = StateEnum.GAME_OVER;
-			return;
-		}
 		// TODO: color and column balancing
 		this.color = Math.randInt(0, COLORS.length);
 		do {
@@ -90,7 +78,6 @@ class Piece {
 
 		// Update connections and connection appearances.
 		for (var i = 0; i < this.connection.length; i++) {
-			// TODO: Only track connections one way?
 			if (this.connection[i] < 1) {
 				var nx = this.x + NEIGHBORS[i][0];
 				var ny = this.y + NEIGHBORS[i][1];
@@ -153,12 +140,33 @@ function loop() {
 	ctx.fillStyle = "#FFFFFF";
 	ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+	// Game over check.
+	if (state == StateEnum.RUNNING) {
+		var spawnBlocked = true;
+		var gameOver = true;
+		for (var x = 0; x < BOARD_WIDTH; x++) {
+			if (board[x][0] == null) {
+				spawnBlocked = false;
+			}
+			if (board[x][0] == null || board[x][0].fallDistance > 0) {
+				gameOver = false;
+			}
+		}
+		if (gameOver) {
+			state = StateEnum.GAME_OVER;
+		}
+	}
+
+	// Update everything.
 	if (state == StateEnum.RUNNING) {
 		// Spawn pieces.
+		// TODO: Gradual speedup.
 		// TODO: Speedup button.
 		if (spawnTimer == 0) {
-			new Piece();
-			spawnTimer = SPAWN_RATE;
+			if (!spawnBlocked) {
+				new Piece();
+				spawnTimer = SPAWN_RATE;
+			}
 		} else {
 			spawnTimer--;
 		}
@@ -193,16 +201,25 @@ function loop() {
 var moused = [];
 var mouseDown = false;
 canvas.addEventListener('mousedown', function(e) {
+	if (state != StateEnum.RUNNING) {
+		return;
+	}
 	mouseDown = true;
 	selectCheck(e);
 });
 canvas.addEventListener('mousemove', function(e) {
+	if (state != StateEnum.RUNNING) {
+		return;
+	}
 	if (mouseDown) {
 		selectCheck(e);
 	}
 });
 document.addEventListener('mouseup', function(e) {
-	var colorCheck = new Set(new Array(5).keys());
+	if (state != StateEnum.RUNNING) {
+		return;
+	}
+	var colorCheck = new Set(new Array(COLORS.length).keys());
 	for (var i = 0; i < selected.length; i++) {
 		colorCheck.delete(board[selected[i][0]][selected[i][1]].color)
 	}
