@@ -9,8 +9,19 @@ Math.lerp = function (value1, value2, amount) {
   return value1 + (value2 - value1) * amount;
 };
 
+// from http://www.gizma.com/easing/
+Math.easeInOutQuad = function (t, b, c, d) {
+  t /= d/2;
+  if (t < 1) return c/2*t*t + b;
+  t--;
+  return -c/2 * (t*(t-2) - 1) + b;
+};
+
+Math.randFloat = function (min, max) {
+	return Math.random() * (max - min) + min;
+};
 Math.randInt = function (min, max) {
-	return Math.floor(Math.random() * (max - min)) + min;
+  return Math.floor(Math.random() * (max - min)) + min;
 };
 
 Math.pickFromWeightArray = function (arr) {

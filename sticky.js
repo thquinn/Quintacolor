@@ -1,4 +1,13 @@
+// TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
+// TODO: Click after game over to replay.
+// TODO: Come up with a new name.
+// TODO: Add particle effects! Flash white and disintegrate.
+// TODO: More fun score effects.
+// TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
+// TODO: Sound?
+
 var StateEnum = {
+	TITLE: -2,
 	SETUP: -1,
 	RUNNING: 0,
 	GAME_OVER: 1,
@@ -9,37 +18,44 @@ var KeyBindings = {
 var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
 // Board appearance constants.
+var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
-var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF' ]
-var BASE_COLOR = '#606080';
+var BASE_COLOR = '#707090';
 var SELECTION_OPACITY = .5;
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
 var PIECE_SIZE = 60;
 var STROKE_WIDTH = 10;
 var BOARD_PADDING = PIECE_SIZE;
-var CONNECTION_APPEARANCE_RATE = .1;
+var CONNECTION_APPEARANCE_RATE = .2;
 var SETUP_SPAWN_RATE = 1; // frames per piece
-var POST_SETUP_PAUSE = 60;
+var POST_SETUP_PAUSE = 45;
 // UI appearance constants.
+var UI_TITLE_FADE_RATE = .025;
 var UI_WIDTH = PIECE_SIZE * 8;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
+// Text constants.
+var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of BLOCKS.", "CLICK and DRAG through exactly one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
+// Background appearance constants.
+var BACKGROUND_TILT = Math.PI * .05;
+var BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
+var BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
 // Gameplay constants.
 var SETUP_ROWS = 4;
-var COLUMN_SELECTION_WEIGHT_EXPONENT = 3;
+var COLUMN_SELECTION_WEIGHT_EXPONENT = 10;
 var COLOR_SELECTION_WEIGHT_MIN = 10;
-var COLOR_SELECTION_WEIGHT_EXPONENT = 1.5;
+var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
 var INITIAL_FALL_VELOCITY = .025;
-var GRAVITY = .006;
+var GRAVITY = .007;
 var LEVEL_RATE = 40 * 60; // 40 seconds
 var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
-var SPAWN_RATE_INCREMENT = .15;
+var SPAWN_RATE_INCREMENT = .1;
 var MULTIPLIER_INCREMENT = .05;
 var MULTIPLIER_FORCE_INCREMENT = .08;
-var LEVEL_UP_FORCE_COOLDOWN = 1 * 60; // 1 second
-var CONNECTION_RATE = .0075;
+var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
+var CONNECTION_RATE = .01;
 
 var canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
@@ -47,7 +63,8 @@ canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 var ctx = canvas.getContext('2d');
 
 var clock = 0;
-var state = StateEnum.SETUP;
+var state = StateEnum.TITLE;
+var titleFade = 1.0;
 var board = new Array(BOARD_WIDTH);
 for (var i = 0; i < BOARD_WIDTH; i++) {
 	board[i] = new Array(BOARD_HEIGHT);
@@ -69,6 +86,7 @@ class Piece {
 			return;
 		}
 		// Select column.
+		// TODO: Balance column and color together based on where they're missing?
 		if (col == null) {
 			var xWeights = new Array(BOARD_WIDTH).fill(0);
 			for (var x = 0; x < BOARD_WIDTH; x++) {
@@ -197,10 +215,87 @@ class Piece {
 	}
 }
 
+class Background {
+	constructor() {
+		this.squiggles = [];
+		for (var i = 0; i < 15; i++) {
+			this.squiggles.push(new Squiggle());
+		}
+	}
+	update() {
+		for (let squiggle of this.squiggles) {
+			squiggle.update();
+		}
+	}
+	draw() {
+		ctx.fillStyle = "#D0E8FF";
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		ctx.save();
+		ctx.translate(canvas.width / 2, canvas.height / 2);
+		ctx.rotate(BACKGROUND_TILT);
+		ctx.translate(-canvas.width / 2, -canvas.height / 2);
+		ctx.fillStyle = BACKGROUND_SQUIGGLE_COLOR;
+		for (let squiggle of this.squiggles) {
+			squiggle.draw();
+		}
+		ctx.restore();
+	}
+}
+class Squiggle {
+	constructor() {
+		this.coor = [Math.random() * canvas.width, Math.random() * canvas.height];
+		this.horiz = Math.random() < .5;
+		this.newTarget();
+		this.frames = 0;
+	}
+	newTarget() {
+		this.target = this.coor.slice();
+		var delta;
+		if (this.horiz) {
+			this.target[0] = canvas.width * -.5 + 1.5 * Math.random() * canvas.width;
+			delta = this.target[0] - this.coor[0];
+		} else {
+			this.target[1] = canvas.height * -.5 + 1.5 * Math.random() * canvas.height;
+			delta = this.target[1] - this.coor[1];
+		}
+		this.waitFrames = Math.randInt(10, 25);
+		this.moveFrames = Math.round(Math.randFloat(.33, .5) * Math.abs(delta));
+	}
+	update() {
+		this.frames++;
+		if (this.frames == this.waitFrames + this.moveFrames) {
+			this.coor = this.target;
+			this.horiz = !this.horiz;
+			this.newTarget();
+			this.frames = 0;
+		}
+	}
+	draw() {
+		var interpVal = this.frames < this.waitFrames ? 0 : (this.frames - this.waitFrames) / (this.moveFrames);
+		var leftRight, topBottom;
+		if (this.coor[0] != this.target[0]) {
+			leftRight = this.getDrawCoors(this.coor[0], this.target[0], interpVal);
+			topBottom = [this.coor[1], this.coor[1] + BACKGROUND_SQUIGGLE_SIZE];
+		} else {
+			leftRight = [this.coor[0], this.coor[0] + BACKGROUND_SQUIGGLE_SIZE];
+			topBottom = this.getDrawCoors(this.coor[1], this.target[1], interpVal);
+		}
+		ctx.fillRect(leftRight[0], topBottom[0], leftRight[1] - leftRight[0], topBottom[1] - topBottom[0]);
+	}
+	getDrawCoors(val, target, interpVal) {
+		var coors = [interpVal <= .5 ? val : Math.easeInOutQuad(interpVal - .5, val, (target - val), .5),
+					 interpVal <= .5 ? Math.easeInOutQuad(interpVal, val, (target - val), .5) : target];
+		coors.sort(function(a, b){return a - b});
+		coors[1] += BACKGROUND_SQUIGGLE_SIZE;
+		return coors;
+	}
+}
+var background = new Background();
+
 function loop() {
 	window.requestAnimationFrame(loop);
-	ctx.fillStyle = "#D0E8FF";
-	ctx.fillRect(0, 0, canvas.width, canvas.height);
+	background.update();
+	background.draw();
 
 	// Setup.
 	if (state == StateEnum.SETUP) {
@@ -216,7 +311,6 @@ function loop() {
 		}
 	}
 
-	clock++;
 	// Game over check.
 	if (state == StateEnum.RUNNING) {
 		spawnBlocked = true;
@@ -230,6 +324,7 @@ function loop() {
 			}
 		}
 		if (gameOver) {
+			selected = [];
 			state = StateEnum.GAME_OVER;
 		}
 	}
@@ -294,7 +389,7 @@ function loop() {
 	ctx.fillStyle = "#FFFFFF";
 	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText(score, canvas.width - BOARD_PADDING, canvas.height / 2);
-	var leadingZeroes = UI_SCORE_DIGITS - score.toString().length;
+	var leadingZeroes = Math.max(0, UI_SCORE_DIGITS - score.toString().length);
 	var scoreWidth = ctx.measureText(score).width;
 	ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
@@ -308,8 +403,7 @@ function loop() {
 	ctx.lineTo(levelX, levelY);
 	ctx.fillStyle = "rgba(255, 255, 255, .5)";
 	ctx.fill();
-	ctx.textAlign= 'center';
-	ctx.textBaseline = 'middle';
+	ctx.textAlign = 'center';
 	ctx.fillStyle = "#9090F0";
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
 	ctx.fillText(level, levelX, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
@@ -317,12 +411,36 @@ function loop() {
 	ctx.fillText("Level", levelX, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
 	// Draw game over?
 	if (state == StateEnum.GAME_OVER) {
+		ctx.textAlign= 'right';
+		ctx.textBaseline = 'alphabetic';
+		ctx.fillStyle = "#C00060";
+		ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
+		ctx.fillText("GAME OVER", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+		ctx.textBaseline = 'top';
+		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
+		ctx.fillText("refresh the window to play again", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+	}
+
+	// Draw title screen.
+	if (titleFade > 0) {
+		ctx.fillStyle = "rgba(208, 232, 255, " + titleFade + ")";
+		ctx.fillRect(0, 0, canvas.width, canvas.height);
+		if (state != StateEnum.TITLE) {
+			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
+		}
 		ctx.textAlign= 'center';
-		ctx.fillStyle = "#000000";
-		ctx.font = "bold 100px Source Sans Pro";
-		ctx.fillText("GAME OVER", canvas.width / 2, canvas.height / 3);
-		ctx.font = "48px Source Sans Pro";
-		ctx.fillText("refresh the window to play again", canvas.width / 2, canvas.height / 2);
+		ctx.textBaseline = 'middle';
+		ctx.fillStyle = "rgba(144, 144, 240, " + titleFade + ")";
+		ctx.font = "bold " + (UI_SCORE_FONT_SIZE * 2) + "px Source Sans Pro";
+		ctx.fillText("Game", canvas.width / 2, canvas.height / 3);
+		ctx.font = (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+		for (var i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
+			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
+		}
+	}
+
+	if (state != StateEnum.TITLE) {
+		clock++;
 	}
 
 	// Update key states.
@@ -332,7 +450,15 @@ function loop() {
 var moused = [];
 var mouseDown = false;
 canvas.addEventListener('mousedown', function(e) {
+	if (state == StateEnum.TITLE) {
+		state = StateEnum.SETUP;
+		return;
+	}
 	if (state != StateEnum.RUNNING) {
+		return;
+	}
+	if (e.which == 3) { // right click
+		selected = [];
 		return;
 	}
 	mouseDown = true;
@@ -363,7 +489,7 @@ window.addEventListener('mouseup', function(e) {
 			score = Math.round(score + item.children.size * 100 * multiplier);
 			item.destroy();
 		}
-		fallCheck(); // TODO: Add this to the main loop to prevent race conditions.
+		fallCheck(); // TODO: Keep this kind of thing in the main loop.
 	}
 
 	selected = [];
@@ -375,6 +501,9 @@ window.addEventListener('keydown', function(e) {
 });
 window.addEventListener('keyup', function(e) {
 	keysDown.delete(e.keyCode);
+});
+canvas.addEventListener('contextmenu', function(e) {
+	e.preventDefault();
 });
 
 function selectCheck(e) {
