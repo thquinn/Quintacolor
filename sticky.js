@@ -25,18 +25,19 @@ var POST_SETUP_PAUSE = 60;
 var UI_WIDTH = PIECE_SIZE * 8;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
+var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 // Gameplay constants.
 var SETUP_ROWS = 4;
 var COLUMN_SELECTION_WEIGHT_EXPONENT = 3;
 var COLOR_SELECTION_WEIGHT_MIN = 10;
-var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
+var COLOR_SELECTION_WEIGHT_EXPONENT = 1.5;
 var INITIAL_FALL_VELOCITY = .025;
 var GRAVITY = .006;
-var LEVEL_RATE = 30 * 60; // 30 seconds
+var LEVEL_RATE = 40 * 60; // 40 seconds
 var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 var SPAWN_RATE_INCREMENT = .15;
-var MULTIPLIER_INCREMENT = .1;
-var MULTIPLIER_FORCE_INCREMENT = .15;
+var MULTIPLIER_INCREMENT = .05;
+var MULTIPLIER_FORCE_INCREMENT = .08;
 var LEVEL_UP_FORCE_COOLDOWN = 1 * 60; // 1 second
 var CONNECTION_RATE = .0075;
 
@@ -44,8 +45,6 @@ var canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 var ctx = canvas.getContext('2d');
-ctx.lineWidth = STROKE_WIDTH;
-ctx.textBaseline = 'middle';
 
 var clock = 0;
 var state = StateEnum.SETUP;
@@ -59,7 +58,7 @@ var levelTimer = LEVEL_RATE;
 var levelUpForceCooldown = 0;
 var spawnTimer = 0;
 var selected = [];
-var level = 0;
+var level = 1;
 var score = 0;
 var multiplier = 1;
 var spawnBlocked = false;
@@ -268,7 +267,7 @@ function loop() {
 		if (spawnTimer <= 0) {
 			if (!spawnBlocked) {
 				new Piece();
-				var rate = SPAWN_RATE_INITIAL + level * SPAWN_RATE_INCREMENT;
+				var rate = SPAWN_RATE_INITIAL + (level - 1) * SPAWN_RATE_INCREMENT;
 				spawnTimer += 60 / rate;
 			}
 		} else {
@@ -291,6 +290,7 @@ function loop() {
 	ctx.fillRect(BOARD_PADDING, baseY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY);
 	// Draw UI.
 	ctx.textAlign= 'right';
+	ctx.textBaseline = 'middle';
 	ctx.fillStyle = "#FFFFFF";
 	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText(score, canvas.width - BOARD_PADDING, canvas.height / 2);
@@ -300,7 +300,21 @@ function loop() {
 	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
 	ctx.fillStyle = "#9090F0";
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
-	ctx.fillText('Level: ' + level + '        Multiplier: ' + Math.round(multiplier * 100) + '%', canvas.width - BOARD_PADDING, canvas.height * .5625);
+	ctx.fillText('Multiplier: ' + Math.round(multiplier * 100) + '%', canvas.width - BOARD_PADDING, canvas.height * .5625);
+	var levelPercent = levelTimer / LEVEL_RATE;
+	var levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
+	ctx.beginPath();
+	ctx.arc(levelX, levelY, UI_LEVEL_CIRCLE_RADIUS, Math.PI * 1.5, Math.PI * (1.5 - 2 * levelPercent), true);
+	ctx.lineTo(levelX, levelY);
+	ctx.fillStyle = "rgba(255, 255, 255, .5)";
+	ctx.fill();
+	ctx.textAlign= 'center';
+	ctx.textBaseline = 'middle';
+	ctx.fillStyle = "#9090F0";
+	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+	ctx.fillText(level, levelX, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
+	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
+	ctx.fillText("Level", levelX, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
 	// Draw game over?
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'center';
