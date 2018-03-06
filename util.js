@@ -1,3 +1,5 @@
+var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+
 Math.precisionRound = function (number, precision) {
   var factor = Math.pow(10, precision);
   return Math.round(number * factor) / factor;
@@ -79,4 +81,29 @@ function mousePos(el, e) {
     x: e.clientX - xPosition,
     y: e.clientY - yPosition,
   };
+}
+
+class Polyomino {
+  constructor(coors) {
+    this.coors = coors;
+  }
+}
+
+function randomPolyomino(n) {
+  var coors = new Map();
+  var frontier = new Map();
+  frontier.set([0, 0].toString(), [0, 0]);
+  while (coors.size < n) {
+    var nextKey = Array.from(frontier.keys())[Math.randInt(0, frontier.size)];
+    var nextVal = frontier.get(nextKey);
+    coors.set(nextKey, nextVal);
+    frontier.delete(nextKey);
+    for (let neighbor of NEIGHBORS) {
+      var nextFrontier = [nextVal[0] + neighbor[0], nextVal[1] + neighbor[1]];
+      if (!coors.has(nextFrontier.toString())) {
+        frontier.set(nextFrontier.toString(), nextFrontier);
+      }
+    }
+  }
+  return new Polyomino(coors);
 }

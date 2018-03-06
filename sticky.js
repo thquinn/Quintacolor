@@ -1,4 +1,3 @@
-// TODO: Click after game over to replay.
 // TODO: Additional game over effects.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
@@ -6,8 +5,10 @@
 // TODO: Come up with a name.
 // TODO: More fun score effects.
 // TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
-// MECHANIC: Show a large-ish shape on the side of the screen. Destroy an identical shape (reflection/rotation permitted) for a big score (or multiplier) bonus!
+// TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
+// MECHANIC: Show a random polyomino on the side of the screen. Destroy that polyomino (reflection/rotation permitted) for a big score (or multiplier) bonus!
 //		If the color matches what's shown, get even more points?
+//		If you destroy a shape that is a superset of the shape, you get partial credit.
 
 var StateEnum = {
 	TITLE: -2,
@@ -17,8 +18,7 @@ var StateEnum = {
 };
 var KeyBindings = {
 	INCREASE_LEVEL: 32,
-};
-var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+};	
 
 // Board appearance constants.
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
@@ -40,6 +40,7 @@ var UI_WIDTH = PIECE_SIZE * 8;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
+var UI_GAME_OVER_FADE_TIME = 60;
 // Text constants.
 var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.", "Drag a length-" + COLORS.length + " line through one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
 // Background constants.
@@ -61,8 +62,8 @@ var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
 var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
 var EFFECTS_SPARKLE_FADE_SPEED = .0125;
 // Gameplay constants.
-var SETUP_ROWS = 4;
-var COLUMN_SELECTION_WEIGHT_EXPONENT = 7;
+var SETUP_ROWS = 6;
+var COLUMN_SELECTION_WEIGHT_EXPONENT = 5;
 var COLOR_SELECTION_WEIGHT_MIN = 10;
 var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
 var INITIAL_FALL_VELOCITY = .1;
@@ -83,23 +84,27 @@ ctx.strokeStyle = "#FFFFFF";
 ctx.lineWidth = STROKE_WIDTH;
 ctx.lineCap = "square";
 
-var clock = 0;
-var state = StateEnum.TITLE;
-var titleFade = 1.0;
-var board = new Array(BOARD_WIDTH);
-for (var i = 0; i < BOARD_WIDTH; i++) {
-	board[i] = new Array(BOARD_HEIGHT);
+var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock;
+function start() {
+	clock = 0;
+	state = StateEnum.TITLE;
+	titleFade = 1.0;
+	board = new Array(BOARD_WIDTH);
+	for (var i = 0; i < BOARD_WIDTH; i++) {
+		board[i] = new Array(BOARD_HEIGHT);
+	}
+	keysPressed = new Set();
+	keysDown = new Set();
+	levelTimer = LEVEL_RATE;
+	levelUpForceCooldown = 0;
+	spawnTimer = 0;
+	selected = [];
+	level = 1;
+	score = 0;
+	multiplier = 1;
+	spawnBlocked = false;
+	gameOverClock = 0;
 }
-var keysPressed = new Set();
-var keysDown = new Set();
-var levelTimer = LEVEL_RATE;
-var levelUpForceCooldown = 0;
-var spawnTimer = 0;
-var selected = [];
-var level = 1;
-var score = 0;
-var multiplier = 1;
-var spawnBlocked = false;
 
 class Piece {
 	constructor(col) {
@@ -122,7 +127,7 @@ class Piece {
 			this.x = col;
 		}
 		this.y = 0;
-		while (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] == null) { // TODO: fix this ugly thing
+		while (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] == null) {
 			this.y++;
 		}
 		// Select color.
@@ -538,12 +543,12 @@ function loop() {
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'right';
 		ctx.textBaseline = 'alphabetic';
-		ctx.fillStyle = "#C00060";
+		ctx.fillStyle = "rgba(192, 0, 96, " + (gameOverClock / UI_GAME_OVER_FADE_TIME) + ")";
 		ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 		ctx.fillText("GAME OVER", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
 		ctx.textBaseline = 'top';
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-		ctx.fillText("refresh the window to play again", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+		ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
 	}
 
 	// Draw title screen.
@@ -567,6 +572,9 @@ function loop() {
 	if (state != StateEnum.TITLE) {
 		clock++;
 	}
+	if (state == StateEnum.GAME_OVER) {
+		gameOverClock++;
+	}
 
 	// Update key states.
 	keysPressed.clear();
@@ -577,6 +585,10 @@ var mouseDown = false;
 canvas.addEventListener('mousedown', function(e) {
 	if (state == StateEnum.TITLE) {
 		state = StateEnum.SETUP;
+		return;
+	}
+	if (state == StateEnum.GAME_OVER && gameOverClock >= UI_GAME_OVER_FADE_TIME) {
+		start();
 		return;
 	}
 	if (state != StateEnum.RUNNING) {
@@ -731,4 +743,5 @@ function fallCheck() {
 	}
 }
 
+start();
 loop();
