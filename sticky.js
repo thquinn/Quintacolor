@@ -1,10 +1,13 @@
 // TODO: Click after game over to replay.
 // TODO: Additional game over effects.
-// TODO: More fun score effects.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Come up with a name.
+// TODO: More fun score effects.
+// TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
+// MECHANIC: Show a large-ish shape on the side of the screen. Destroy an identical shape (reflection/rotation permitted) for a big score (or multiplier) bonus!
+//		If the color matches what's shown, get even more points?
 
 var StateEnum = {
 	TITLE: -2,
@@ -21,7 +24,6 @@ var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 var BASE_COLOR = '#707090';
-var SELECTION_OPACITY = .4;
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
 var PIECE_SIZE = 60;
@@ -30,6 +32,8 @@ var BOARD_PADDING = PIECE_SIZE;
 var CONNECTION_APPEARANCE_RATE = .2;
 var SETUP_SPAWN_RATE = 1; // frames per piece
 var POST_SETUP_PAUSE = 45;
+var SELECTION_OPACITY = .4;
+var SELECTION_END_RADIUS = PIECE_SIZE / 6;
 // UI constants.
 var UI_TITLE_FADE_RATE = .025;
 var UI_WIDTH = PIECE_SIZE * 8;
@@ -45,8 +49,8 @@ var BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
 // Effects appearance.
 var EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
 var EFFECTS_VANISH_INIT_VELOCITY_VARIANCE = EFFECTS_VANISH_INIT_VELOCITY / 5;
-var EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1200;
-var EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .00002;
+var EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1500;
+var EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .000015;
 var EFFECTS_VANISH_FADE_SPEED = .02;
 var EFFECTS_SPARKLE_COUNT = 5;
 var EFFECTS_SPARKLE_RADIUS = PIECE_SIZE / 16;
@@ -67,7 +71,7 @@ var LEVEL_RATE = 40 * 60; // 40 seconds
 var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 var SPAWN_RATE_INCREMENT = .1;
 var MULTIPLIER_INCREMENT = .05;
-var MULTIPLIER_FORCE_INCREMENT = .12;
+var MULTIPLIER_FORCE_INCREMENT = .1;
 var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
 var CONNECTION_RATE = .01;
 
@@ -77,6 +81,7 @@ canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 var ctx = canvas.getContext('2d');
 ctx.strokeStyle = "#FFFFFF";
 ctx.lineWidth = STROKE_WIDTH;
+ctx.lineCap = "square";
 
 var clock = 0;
 var state = StateEnum.TITLE;
@@ -489,12 +494,19 @@ function loop() {
 	// Draw selection path.
 	if (selected.length > 1) {
 		ctx.beginPath();
+		var x, y;
 		for (var i = 0; i < selected.length; i++) {
-			var x = BOARD_PADDING + (selected[i][0] + .5) * PIECE_SIZE;
-			var y = (selected[i][1] + .5) * PIECE_SIZE;
+			x = BOARD_PADDING + (selected[i][0] + .5) * PIECE_SIZE;
+			y = (selected[i][1] + .5) * PIECE_SIZE;
 			i == 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
 		}
 		ctx.stroke();
+		if (selected.length == COLORS.length) {
+			ctx.beginPath();
+			ctx.arc(x, y, SELECTION_END_RADIUS, 0, 2 * Math.PI, false);
+			ctx.fillStyle = "#FFFFFF";
+			ctx.fill();
+		}
 	}
 	// Draw UI.
 	ctx.textAlign= 'right';
@@ -623,6 +635,23 @@ function selectCheck(e) {
 	var mouse = mousePos(canvas, e);
 	var x = Math.floor((mouse.x - BOARD_PADDING) / PIECE_SIZE);
 	var y = Math.floor(mouse.y / PIECE_SIZE);
+	if (selected.length == 0) {
+		selectCheckHelper(x, y);
+		return;
+	}
+	var coor = selected[selected.length - 1].slice();
+	var dx = x - coor[0];
+	while (coor[0] != x) {
+		coor[0] += dx / Math.abs(dx);
+		selectCheckHelper(coor[0], coor[1]);
+	}
+	var dy = y - coor[1];
+	while (coor[1] != y) {
+		coor[1] += dy / Math.abs(dy);
+		selectCheckHelper(coor[0], coor[1]);
+	}
+}
+function selectCheckHelper(x, y) {
 	if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT)
 		return;
 	if (board[x][y] == null || board[x][y].fallDistance > 0) {
@@ -635,7 +664,6 @@ function selectCheck(e) {
 	if (selected.length == COLORS.length) {
 		return;
 	}
-	// TODO: Allow crossing over multiple pieces in a single frame, and seeking to mouse even when it's off the board.
 	if (selected.length > 0) {
 		var last = selected[selected.length - 1];
 		var d = Math.abs(last[0] - x) + Math.abs(last[1] - y);
