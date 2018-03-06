@@ -1,11 +1,13 @@
 // TODO: Additional game over effects.
+// TODO: More fun score effects.
+// TODO: Better sparkles.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
-// TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Come up with a name.
-// TODO: More fun score effects.
 // TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
+// TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
+
 // MECHANIC: Show a random polyomino on the side of the screen. Destroy that polyomino (reflection/rotation permitted) for a big score (or multiplier) bonus!
 //		If the color matches what's shown, get even more points?
 //		If you destroy a shape that is a superset of the shape, you get partial credit.
@@ -34,6 +36,7 @@ var SETUP_SPAWN_RATE = 1; // frames per piece
 var POST_SETUP_PAUSE = 45;
 var SELECTION_OPACITY = .4;
 var SELECTION_END_RADIUS = PIECE_SIZE / 6;
+var BOARD_GAME_OVER_DESATURATION = .9;
 // UI constants.
 var UI_TITLE_FADE_RATE = .025;
 var UI_WIDTH = PIECE_SIZE * 8;
@@ -489,6 +492,21 @@ function loop() {
 			}
 			board[x][y].draw();
 		}
+	}
+	// Draw desaturation overlay.
+	if (state == StateEnum.GAME_OVER) {
+		var alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
+		ctx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
+		ctx.globalCompositeOperation = 'saturation';
+		for (var x = 0; x < BOARD_WIDTH; x++) {
+			for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
+				if (board[x][y] == null) {
+					continue;
+				}
+				ctx.fillRect(BOARD_PADDING + x * PIECE_SIZE, (y - board[x][y].fallDistance) * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+			}
+		}
+		ctx.globalCompositeOperation = 'source-over';
 	}
 	// Draw base.
 	var baseY = BOARD_HEIGHT * PIECE_SIZE;
