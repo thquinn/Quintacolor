@@ -1,10 +1,11 @@
-// TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
+// TODO: White selection outline instead of overlay?
+// TODO: Allow backing out of selection.
 // TODO: Click after game over to replay.
 // TODO: Come up with a new name.
-// TODO: Add particle effects! Flash white and disintegrate.
 // TODO: More fun score effects.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
+// TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 
 var StateEnum = {
 	TITLE: -2,
@@ -30,25 +31,39 @@ var BOARD_PADDING = PIECE_SIZE;
 var CONNECTION_APPEARANCE_RATE = .2;
 var SETUP_SPAWN_RATE = 1; // frames per piece
 var POST_SETUP_PAUSE = 45;
-// UI appearance constants.
+// UI constants.
 var UI_TITLE_FADE_RATE = .025;
 var UI_WIDTH = PIECE_SIZE * 8;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 // Text constants.
-var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of BLOCKS.", "CLICK and DRAG through exactly one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
-// Background appearance constants.
+var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.", "Drag a length " + COLORS.length + " line through one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
+// Background constants.
 var BACKGROUND_TILT = Math.PI * .05;
 var BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
 var BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
+// Effects appearance.
+var EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
+var EFFECTS_VANISH_INIT_VELOCITY_VARIANCE = EFFECTS_VANISH_INIT_VELOCITY / 5;
+var EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1200;
+var EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .00002;
+var EFFECTS_VANISH_FADE_SPEED = .025;
+var EFFECTS_SPARKLE_COUNT = 5;
+var EFFECTS_SPARKLE_RADIUS = PIECE_SIZE / 16;
+var EFFECTS_SPARKLE_INIT_VELOCITY = PIECE_SIZE / 60;
+var EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE = PIECE_SIZE / 60;
+var EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 600;
+var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 40;
+var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
+var EFFECTS_SPARKLE_FADE_SPEED = .0125;
 // Gameplay constants.
 var SETUP_ROWS = 4;
 var COLUMN_SELECTION_WEIGHT_EXPONENT = 10;
 var COLOR_SELECTION_WEIGHT_MIN = 10;
 var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
-var INITIAL_FALL_VELOCITY = .025;
-var GRAVITY = .007;
+var INITIAL_FALL_VELOCITY = .1;
+var GRAVITY = .005;
 var LEVEL_RATE = 40 * 60; // 40 seconds
 var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 var SPAWN_RATE_INCREMENT = .1;
@@ -128,14 +143,6 @@ class Piece {
 		this.children = new Set([this]);
 	}
 
-	breakPartialConnections() {
-		for (var i = 0; i < this.connection.length; i++) {
-			if (this.connection[i] != 1) {
-				this.connection[i] = 0;
-			}
-		}
-	}
-
 	update(setup) {
 		if (this.fallDistance > 0) {
 			this.dy += GRAVITY;
@@ -161,10 +168,12 @@ class Piece {
 			if (this.connection[i] < 1) {
 				var nx = this.x + NEIGHBORS[i][0];
 				var ny = this.y + NEIGHBORS[i][1];
-				if (this.fallDistance > 0 || nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT || board[nx][ny] == null || board[nx][ny].fallDistance > 0 || board[nx][ny].color != this.color) {
-					// TODO: don't break vertical partial connections because of falling.
-					// TODO: don't break horizontal connections if one piece is falling alongside another the whole time.
+				if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT || board[nx][ny] == null || board[nx][ny].color != this.color) {
 					this.connection[i] = 0;
+				} else if (this.fallDistance > 0 || board[nx][ny].fallDistance > 0) {
+					// TODO: Fix connections still breaking while falling in parallel.
+					var iReverse = (i / 2) * 2 + ((i + 1) % 2);
+					this.connection[i] = Math.min(this.connection[i], board[nx][ny].connection[iReverse]);
 				} else {
 					this.connection[i] = Math.min(this.connection[i] + CONNECTION_RATE, 1);
 					if (this.connection[i] == 1) {
@@ -211,6 +220,7 @@ class Piece {
 	destroy() {
 		for (let child of this.root.children) {
 			board[child.x][child.y] = null;
+			effects.vanish(child.x, child.y);
 		}
 	}
 }
@@ -292,6 +302,96 @@ class Squiggle {
 }
 var background = new Background();
 
+class Effects {
+	constructor() {
+		this.vanishes = [];
+		this.sparkles = [];
+	}
+	vanish(x, y) {
+		this.vanishes.push(new Vanish(x, y));
+		for (var i = 0; i < EFFECTS_SPARKLE_COUNT; i++) {
+			var sx = BOARD_PADDING + x * PIECE_SIZE + Math.random() * PIECE_SIZE;
+			var sy = y * PIECE_SIZE + Math.random() * PIECE_SIZE;
+			this.sparkles.push(new Sparkle(sx, sy));
+		}
+	}
+	update() {
+		for (var i = this.vanishes.length - 1; i >= 0; i--) {
+			this.vanishes[i].update();
+			if (this.vanishes[i].alpha == 0) {
+				this.vanishes.splice(i, 1);
+			}
+		}
+		for (var i = this.sparkles.length - 1; i >= 0; i--) {
+			this.sparkles[i].update();
+			if (this.sparkles[i].alpha == 0) {
+				this.sparkles.splice(i, 1);
+			}
+		}
+	}
+	draw() {
+		for (let vanish of this.vanishes) {
+			vanish.draw();
+		}
+		for (let sparkle of this.sparkles) {
+			sparkle.draw();
+		}
+	}
+}
+class Vanish {
+	constructor(x, y) {
+		this.x = x;
+		this.y = y;
+		this.dx = Math.randFloat(-EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE, EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE);
+		this.dy = -EFFECTS_VANISH_INIT_VELOCITY + Math.randFloat(-EFFECTS_VANISH_INIT_VELOCITY_VARIANCE, EFFECTS_VANISH_INIT_VELOCITY_VARIANCE);
+		this.theta = 0;
+		this.dTheta = Math.randFloat(-EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE, EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE);
+		this.alpha = 1 + EFFECTS_VANISH_FADE_SPEED;
+	}
+	update() {
+		this.dy += GRAVITY;
+		this.x += this.dx;
+		this.y += this.dy;
+		this.theta += this.dTheta;
+		this.alpha = Math.max(0, this.alpha - EFFECTS_VANISH_FADE_SPEED);
+	}
+	draw() {
+		var px = BOARD_PADDING + this.x * PIECE_SIZE;
+		var py = this.y * PIECE_SIZE;
+		ctx.save();
+		ctx.translate(px + PIECE_SIZE / 2, py + PIECE_SIZE / 2);
+		ctx.rotate(this.theta * 1000);
+		ctx.translate(-px - PIECE_SIZE / 2, -py - PIECE_SIZE / 2);
+		ctx.fillStyle = "rgba(255, 255, 255, " + this.alpha + ")";
+		ctx.fillRect(px, py, PIECE_SIZE, PIECE_SIZE);
+		ctx.restore();
+	}
+}
+class Sparkle {
+	constructor(x, y) {
+		this.x = x;
+		this.y = y;
+		this.dx = Math.randFloat(-EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE, EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE);
+		this.dy = -EFFECTS_SPARKLE_INIT_VELOCITY;
+		this.dy += Math.randFloat(-EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE, EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE)
+		this.alpha = 1 + EFFECTS_SPARKLE_FADE_SPEED;
+	}
+	update() {
+		this.dx *= EFFECTS_SPARKLE_HORIZONTAL_DRAG;
+		this.dy -= EFFECTS_SPARKLE_LIFT;
+		this.x += this.dx;
+		this.y += this.dy;
+		this.alpha = Math.max(0, this.alpha - EFFECTS_SPARKLE_FADE_SPEED);
+	}
+	draw() {
+		ctx.beginPath();
+		ctx.arc(this.x, this.y, EFFECTS_SPARKLE_RADIUS, 0, 2 * Math.PI, false);
+		ctx.fillStyle = "rgba(255, 255, 255, " + this.alpha + ")";
+		ctx.fill();
+	}
+}
+var effects = new Effects();
+
 function loop() {
 	window.requestAnimationFrame(loop);
 	background.update();
@@ -368,6 +468,7 @@ function loop() {
 		} else {
 			spawnTimer--;
 		}
+		effects.update();
 	}
 	
 	// Draw pieces.
@@ -383,6 +484,8 @@ function loop() {
 	var baseY = BOARD_HEIGHT * PIECE_SIZE;
 	ctx.fillStyle = BASE_COLOR;
 	ctx.fillRect(BOARD_PADDING, baseY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY);
+	// Draw effects.
+	effects.draw();
 	// Draw UI.
 	ctx.textAlign= 'right';
 	ctx.textBaseline = 'middle';
