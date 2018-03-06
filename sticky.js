@@ -1,11 +1,10 @@
-// TODO: White selection outline instead of overlay?
-// TODO: Allow backing out of selection.
 // TODO: Click after game over to replay.
-// TODO: Come up with a new name.
+// TODO: Additional game over effects.
 // TODO: More fun score effects.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
+// TODO: Come up with a name.
 
 var StateEnum = {
 	TITLE: -2,
@@ -22,7 +21,7 @@ var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 var BASE_COLOR = '#707090';
-var SELECTION_OPACITY = .5;
+var SELECTION_OPACITY = .4;
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
 var PIECE_SIZE = 60;
@@ -38,7 +37,7 @@ var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 // Text constants.
-var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.", "Drag a length " + COLORS.length + " line through one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
+var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.", "Drag a length-" + COLORS.length + " line through one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
 // Background constants.
 var BACKGROUND_TILT = Math.PI * .05;
 var BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
@@ -48,18 +47,18 @@ var EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
 var EFFECTS_VANISH_INIT_VELOCITY_VARIANCE = EFFECTS_VANISH_INIT_VELOCITY / 5;
 var EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1200;
 var EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .00002;
-var EFFECTS_VANISH_FADE_SPEED = .025;
+var EFFECTS_VANISH_FADE_SPEED = .02;
 var EFFECTS_SPARKLE_COUNT = 5;
 var EFFECTS_SPARKLE_RADIUS = PIECE_SIZE / 16;
 var EFFECTS_SPARKLE_INIT_VELOCITY = PIECE_SIZE / 60;
 var EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE = PIECE_SIZE / 60;
-var EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 600;
-var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 40;
+var EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 800;
+var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
 var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
 var EFFECTS_SPARKLE_FADE_SPEED = .0125;
 // Gameplay constants.
 var SETUP_ROWS = 4;
-var COLUMN_SELECTION_WEIGHT_EXPONENT = 10;
+var COLUMN_SELECTION_WEIGHT_EXPONENT = 7;
 var COLOR_SELECTION_WEIGHT_MIN = 10;
 var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
 var INITIAL_FALL_VELOCITY = .1;
@@ -68,7 +67,7 @@ var LEVEL_RATE = 40 * 60; // 40 seconds
 var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 var SPAWN_RATE_INCREMENT = .1;
 var MULTIPLIER_INCREMENT = .05;
-var MULTIPLIER_FORCE_INCREMENT = .08;
+var MULTIPLIER_FORCE_INCREMENT = .12;
 var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
 var CONNECTION_RATE = .01;
 
@@ -76,6 +75,8 @@ var canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 var ctx = canvas.getContext('2d');
+ctx.strokeStyle = "#FFFFFF";
+ctx.lineWidth = STROKE_WIDTH;
 
 var clock = 0;
 var state = StateEnum.TITLE;
@@ -101,7 +102,6 @@ class Piece {
 			return;
 		}
 		// Select column.
-		// TODO: Balance column and color together based on where they're missing?
 		if (col == null) {
 			var xWeights = new Array(BOARD_WIDTH).fill(0);
 			for (var x = 0; x < BOARD_WIDTH; x++) {
@@ -349,7 +349,7 @@ class Vanish {
 		this.alpha = 1 + EFFECTS_VANISH_FADE_SPEED;
 	}
 	update() {
-		this.dy += GRAVITY;
+		this.dy += GRAVITY * PIECE_SIZE / 50;
 		this.x += this.dx;
 		this.y += this.dy;
 		this.theta += this.dTheta;
@@ -486,6 +486,16 @@ function loop() {
 	ctx.fillRect(BOARD_PADDING, baseY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY);
 	// Draw effects.
 	effects.draw();
+	// Draw selection path.
+	if (selected.length > 1) {
+		ctx.beginPath();
+		for (var i = 0; i < selected.length; i++) {
+			var x = BOARD_PADDING + (selected[i][0] + .5) * PIECE_SIZE;
+			var y = (selected[i][1] + .5) * PIECE_SIZE;
+			i == 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+		}
+		ctx.stroke();
+	}
 	// Draw UI.
 	ctx.textAlign= 'right';
 	ctx.textBaseline = 'middle';
@@ -610,9 +620,6 @@ canvas.addEventListener('contextmenu', function(e) {
 });
 
 function selectCheck(e) {
-	if (selected.length == COLORS.length) {
-		return;
-	}
 	var mouse = mousePos(canvas, e);
 	var x = Math.floor((mouse.x - BOARD_PADDING) / PIECE_SIZE);
 	var y = Math.floor(mouse.y / PIECE_SIZE);
@@ -622,12 +629,15 @@ function selectCheck(e) {
 		return;
 	}
 	var coor = [x, y];
-	// TODO: Allow crossing over multiple pieces in a single frame.
+	if (selected.length > 1 && Array.equal(selected[selected.length - 2], coor)) {
+		selected.splice(selected.length - 1, 1);
+	}
+	if (selected.length == COLORS.length) {
+		return;
+	}
+	// TODO: Allow crossing over multiple pieces in a single frame, and seeking to mouse even when it's off the board.
 	if (selected.length > 0) {
 		var last = selected[selected.length - 1];
-		if (board[last[0]][last[1]].root == board[x][y].root) {
-			return;
-		}
 		var d = Math.abs(last[0] - x) + Math.abs(last[1] - y);
 		if (d != 1) {
 			return;
