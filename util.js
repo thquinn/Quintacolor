@@ -93,24 +93,101 @@ function touchPos(el, e) {
 class Polyomino {
   constructor(coors) {
     this.coors = coors;
-  }
-}
-
-function randomPolyomino(n) {
-  var coors = new Map();
-  var frontier = new Map();
-  frontier.set([0, 0].toString(), [0, 0]);
-  while (coors.size < n) {
-    var nextKey = Array.from(frontier.keys())[Math.randInt(0, frontier.size)];
-    var nextVal = frontier.get(nextKey);
-    coors.set(nextKey, nextVal);
-    frontier.delete(nextKey);
-    for (let neighbor of NEIGHBORS) {
-      var nextFrontier = [nextVal[0] + neighbor[0], nextVal[1] + neighbor[1]];
-      if (!coors.has(nextFrontier.toString())) {
-        frontier.set(nextFrontier.toString(), nextFrontier);
+    var minX = Number.MAX_SAFE_INTEGER, minY = Number.MAX_SAFE_INTEGER;
+    this.maxX = Number.MIN_SAFE_INTEGER;
+    this.maxY = Number.MIN_SAFE_INTEGER;
+    for (let coor of coors) {
+      if (coor[0] < minX) {
+        minX = coor[0];
+      }
+      if (coor[0] > this.maxX) {
+        this.maxX = coor[0];
+      }
+      if (coor[1] < minY) {
+        minY = coor[1];
+      }
+      if (coor[1] > this.maxY) {
+        this.maxY = coor[1];
       }
     }
+    this.maxX -= minX;
+    this.maxY -= minY;
+    var arr = new Array(this.maxX);
+    for (var i = 0; i <= this.maxX; i++) {
+      arr[i] = new Array(this.maxY + 1).fill('.');
+    }
+    for (let coor of coors) {
+      coor[0] -= minX;
+      coor[1] -= minY;
+      arr[coor[0]][coor[1]] = 'X';
+    }
+    // Create all 8 rotated/reflected string representations of the array.
+    this.representations = new Set();
+    this.representations.add(arr.map(e => e.join('')).join(','));
+    this.representations.add(arr.map(e => e.join('')).reverse().join(','));
+    for (let a of arr) {
+      a.reverse();
+    }
+    this.representations.add(arr.map(e => e.join('')).join(','));
+    this.representations.add(arr.map(e => e.join('')).reverse().join(','));
+    var arrRot = arr[0].map((_, c) => arr.map(r => r[c]));
+    this.representations.add(arrRot.map(e => e.join('')).join(','));
+    this.representations.add(arrRot.map(e => e.join('')).reverse().join(','));
+    for (let a of arrRot) {
+      a.reverse();
+    }
+    this.representations.add(arrRot.map(e => e.join('')).join(','));
+    this.representations.add(arrRot.map(e => e.join('')).reverse().join(','));
   }
-  return new Polyomino(coors);
+
+  isThis(piece) {
+    if (piece.children.size != this.coors.length) {
+      return false;
+    }
+    var minX = Number.MAX_SAFE_INTEGER, minY = Number.MAX_SAFE_INTEGER;
+    var maxX = Number.MIN_SAFE_INTEGER, maxY = Number.MIN_SAFE_INTEGER;
+    for (let child of piece.children) {
+      if (child.x < minX) {
+        minX = child.x;
+      }
+      if (child.x > maxX) {
+        maxX = child.x;
+      }
+      if (child.y < minY) {
+        minY = child.y;
+      }
+      if (child.y > maxY) {
+        maxY = child.y;
+      }
+    }
+    maxX -= minX;
+    maxY -= minY;
+    var arr = new Array(maxX);
+    for (var i = 0; i <= maxX; i++) {
+      arr[i] = new Array(maxY + 1).fill('.');
+    }
+    for (let child of piece.children) {
+      arr[child.x - minX][child.y - minY] = 'X';
+    }
+    return this.representations.has(arr.map(e => e.join('')).join(','));
+  }
+
+  static random(n) {
+    var coors = new Map();
+    var frontier = new Map();
+    frontier.set([0, 0].toString(), [0, 0]);
+    while (coors.size < n) {
+      var nextKey = Array.from(frontier.keys())[Math.randInt(0, frontier.size)];
+      var nextVal = frontier.get(nextKey);
+      coors.set(nextKey, nextVal);
+      frontier.delete(nextKey);
+      for (let neighbor of NEIGHBORS) {
+        var nextFrontier = [nextVal[0] + neighbor[0], nextVal[1] + neighbor[1]];
+        if (!coors.has(nextFrontier.toString())) {
+          frontier.set(nextFrontier.toString(), nextFrontier);
+        }
+      }
+    }
+    return new Polyomino(Array.from(coors.values()));
+  }
 }

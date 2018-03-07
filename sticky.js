@@ -1,17 +1,15 @@
-// TODO: Touch events.
 // TODO: More fun score effects.
 // TODO: Better sparkles.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
+// TODO: If you destroy a piece that is a superset of the shape, you get partial credit?
 // TODO: Come up with a name.
 // TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 
-// MECHANIC: Show a random polyomino on the side of the screen. Destroy that polyomino (reflection/rotation permitted) for a big score (or multiplier) bonus!
-//		If the color matches what's shown, get even more points?
-//		If you destroy a shape that is a superset of the shape, you get partial credit.
-// MECHANIC: Upgrades? Diagonal connections, longer paths?
+// MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal, paths through long pieces, free pathing through empty space?
+// MECHANIC: Wildcards? Rocks?
 
 var StateEnum = {
 	TITLE: -2,
@@ -37,13 +35,16 @@ var SETUP_SPAWN_RATE = 1; // frames per piece
 var POST_SETUP_PAUSE = 45;
 var SELECTION_OPACITY = .4;
 var SELECTION_END_RADIUS = PIECE_SIZE / 6;
-var BOARD_GAME_OVER_DESATURATION = .9;
+var SELECTION_INVALID_COLOR = '#FFC0C0';
+var BOARD_GAME_OVER_DESATURATION = .925;
 // UI constants.
 var UI_TITLE_FADE_RATE = .025;
 var UI_WIDTH = PIECE_SIZE * 8;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
+var UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
+var UI_POLYOMINO_BLOCK_FILL = .8;
 var UI_GAME_OVER_FADE_TIME = 60;
 // Text constants.
 var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.", "Drag a length-" + COLORS.length + " line through one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
@@ -57,14 +58,14 @@ var EFFECTS_VANISH_INIT_VELOCITY_VARIANCE = EFFECTS_VANISH_INIT_VELOCITY / 5;
 var EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1500;
 var EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .000015;
 var EFFECTS_VANISH_FADE_SPEED = .02;
-var EFFECTS_SPARKLE_COUNT = 5;
+var EFFECTS_SPARKLE_COUNT = 4;
 var EFFECTS_SPARKLE_RADIUS = PIECE_SIZE / 16;
 var EFFECTS_SPARKLE_INIT_VELOCITY = PIECE_SIZE / 60;
 var EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE = PIECE_SIZE / 60;
 var EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 800;
 var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
 var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
-var EFFECTS_SPARKLE_FADE_SPEED = .0125;
+var EFFECTS_SPARKLE_FADE_SPEED = .01;
 // Gameplay constants.
 var SETUP_ROWS = 6;
 var COLUMN_SELECTION_WEIGHT_EXPONENT = 5;
@@ -84,11 +85,10 @@ var canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 var ctx = canvas.getContext('2d');
-ctx.strokeStyle = "#FFFFFF";
 ctx.lineWidth = STROKE_WIDTH;
 ctx.lineCap = "square";
 
-var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock;
+var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
@@ -108,6 +108,11 @@ function start() {
 	multiplier = 1;
 	spawnBlocked = false;
 	gameOverClock = 0;
+	moused = [];
+	mouseDown = false;
+	polyomino = null;
+	nextPolyomino();
+	showPolyominoTooltip = false;
 }
 
 class Piece {
@@ -232,6 +237,10 @@ class Piece {
 		}
 	}
 	destroy() {
+		score = Math.round(score + this.root.children.size * 100 * multiplier);
+		if (polyomino.isThis(this.root)) {
+			nextPolyomino();
+		}
 		for (let child of this.root.children) {
 			board[child.x][child.y] = null;
 			effects.vanish(child.x, child.y);
@@ -482,7 +491,6 @@ function loop() {
 		} else {
 			spawnTimer--;
 		}
-		effects.update();
 	}
 	
 	// Draw pieces.
@@ -514,9 +522,21 @@ function loop() {
 	ctx.fillStyle = BASE_COLOR;
 	ctx.fillRect(BOARD_PADDING, baseY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY);
 	// Draw effects.
+	effects.update();
 	effects.draw();
 	// Draw selection path.
 	if (selected.length > 1) {
+		var pathColor = "#FFFFFF";
+		var selectedColors = new Set();
+		for (var i = 0; i < selected.length; i++) {
+			var color = board[selected[i][0]][selected[i][1]].color;
+			if (selectedColors.has(color)) {
+				pathColor = SELECTION_INVALID_COLOR;
+				break;
+			}
+			selectedColors.add(color);
+		}
+		ctx.strokeStyle = pathColor;
 		ctx.beginPath();
 		var x, y;
 		for (var i = 0; i < selected.length; i++) {
@@ -526,9 +546,9 @@ function loop() {
 		}
 		ctx.stroke();
 		if (selected.length == COLORS.length) {
+			ctx.fillStyle = pathColor;
 			ctx.beginPath();
 			ctx.arc(x, y, SELECTION_END_RADIUS, 0, 2 * Math.PI, false);
-			ctx.fillStyle = "#FFFFFF";
 			ctx.fill();
 		}
 	}
@@ -558,6 +578,7 @@ function loop() {
 	ctx.fillText(level, levelX, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
 	ctx.fillText("Level", levelX, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
+	drawPolyominoUI();
 	// Draw game over?
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'right';
@@ -599,14 +620,14 @@ function loop() {
 	keysPressed.clear();
 }
 
-var moused = [];
-var mouseDown = false;
 canvas.addEventListener('mousedown', function(e) {
 	var pos = mousePos(canvas, e);
 	mouseDownHelper(pos.x, pos.y, e.which == 3);
 });
 canvas.addEventListener('touchstart', function(e) {
-	e.preventDefault();
+	if (e.touches.length == 1) {
+		e.preventDefault();
+	}
 	var pos = touchPos(canvas, e);
 	mouseDownHelper(pos.x, pos.y, false);
 });
@@ -634,11 +655,14 @@ canvas.addEventListener('mousemove', function(e) {
 	mouseMoveHelper(pos.x, pos.y);
 });
 canvas.addEventListener('touchmove', function(e) {
-	e.preventDefault();
+	if (e.touches.length == 1) {
+		e.preventDefault();
+	}
 	var pos = touchPos(canvas, e);
 	mouseMoveHelper(pos.x, pos.y);
 });
 function mouseMoveHelper(x, y) {
+	showPolyominoTooltip = x > canvas.width - BOARD_PADDING - UI_POLYOMINO_AREA_SIZE && y < BOARD_PADDING + UI_POLYOMINO_AREA_SIZE;
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
@@ -650,7 +674,9 @@ window.addEventListener('mouseup', function(e) {
 	mouseUpHelper();
 });
 window.addEventListener('touchend', function(e) {
-	e.preventDefault();
+	if (e.touches.length == 1) {
+		e.preventDefault();
+	}
 	mouseUpHelper();
 });
 function mouseUpHelper() {
@@ -667,7 +693,6 @@ function mouseUpHelper() {
 			toDestroy.add(board[selected[i][0]][selected[i][1]].root);
 		}
 		for (let item of toDestroy) {
-			score = Math.round(score + item.children.size * 100 * multiplier);
 			item.destroy();
 		}
 		fallCheck(); // TODO: Keep this kind of thing in the main loop.
@@ -688,9 +713,7 @@ canvas.addEventListener('contextmenu', function(e) {
 });
 
 function selectCheck(x, y) {
-	console.log(x);
 	x = Math.floor((x - BOARD_PADDING) / PIECE_SIZE);
-	console.log(x);
 	y = Math.floor(y / PIECE_SIZE);
 	if (selected.length == 0) {
 		selectCheckHelper(x, y);
@@ -733,6 +756,7 @@ function selectCheckHelper(x, y) {
 	}
 	selected.push([x, y]);
 }
+
 function fallCheck() {
 	// Find to-ground fall distances of shapes.
 	var fallDistances = new Map();
@@ -788,5 +812,58 @@ function fallCheck() {
 	}
 }
 
+// n-to-bounty:
+//	3		4		5		6		7		8		...
+//	1000	3000	6000	10000	15000	21000	...
+// +1000 for each previous bounty
+//
+// score-to-n:
+//	0		>0		>20K	>60K	>120K	>200K	...
+//	3		4		5		6		7		8		...
+function nextPolyomino() {
+	if (polyomino == null) {
+		polyomino = Polyomino.random(3);
+		polyominoBounty = 1000;
+		polyominosScored = 0;
+		return;
+	}
+	score += polyominoBounty * multiplier;
+	polyominosScored++;
+	var n = Math.floor((Math.sqrt(score - 1 + 2500) + 350) / 100); // thanks wolfram alpha
+	polyomino = Polyomino.random(n);
+	polyominoBounty = 500 * (n - 2) * (n - 1) + 1000 * polyominosScored; // thanks wolfram alpha
+}
+function drawPolyominoUI() {
+	// Draw polyomino.
+	var polyPieceSize = UI_POLYOMINO_AREA_SIZE / (Math.max(polyomino.maxX, polyomino.maxY) + 1);
+	var xOffset = polyomino.maxX < polyomino.maxY ? polyomino.maxY - polyomino.maxX : 0;
+	ctx.fillStyle = "rgba(255, 255, 255, 1)";
+	for (var i = 0; i < polyomino.coors.length; i++) {
+		var coor = polyomino.coors[i];
+		ctx.fillRect(canvas.width - BOARD_PADDING - UI_POLYOMINO_AREA_SIZE + (coor[0] + xOffset) * polyPieceSize + polyPieceSize * (1 - UI_POLYOMINO_BLOCK_FILL),
+					 BOARD_PADDING + coor[1] * polyPieceSize,
+					 polyPieceSize * UI_POLYOMINO_BLOCK_FILL,
+					 polyPieceSize * UI_POLYOMINO_BLOCK_FILL);
+	}
+	// Draw polyomino bounty.
+	ctx.fillStyle = "#9090F0";
+	ctx.textAlign= 'center';
+	ctx.textBaseline = 'middle';
+	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+	ctx.fillText('+' + polyominoBounty, canvas.width - BOARD_PADDING - (polyomino.maxX + 1) / 2 * polyPieceSize + polyPieceSize * (1 - UI_POLYOMINO_BLOCK_FILL) / 2,
+										BOARD_PADDING + (polyomino.maxY + 1) / 2 * polyPieceSize - polyPieceSize * (1 - UI_POLYOMINO_BLOCK_FILL) / 2);
+	// Draw polyomino tooltip.
+	if (showPolyominoTooltip) {
+		ctx.fillStyle = "#9090F0";
+		ctx.textAlign= 'right';
+		ctx.textBaseline = 'top';
+		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
+		var tooltipY = BOARD_PADDING + polyPieceSize * (polyomino.maxY + 1);
+		ctx.fillText('clear a piece with this shape (can', canvas.width - BOARD_PADDING, tooltipY);
+		ctx.fillText('be rotated or reflected) to gain this', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5));
+		ctx.fillText('many points, times your multiplier', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5) * 2);
+	}
+}
+
 start();
-loop();
+loop(); 
