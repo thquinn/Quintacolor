@@ -601,13 +601,14 @@ function loop() {
 
 var moused = [];
 var mouseDown = false;
-canvas.addEventListener('touchstart', function(e) {
-	var pos = touchPos(canvas, e);
-	mouseDownHelper(pos.x, pos.y, false);
-});
 canvas.addEventListener('mousedown', function(e) {
 	var pos = mousePos(canvas, e);
 	mouseDownHelper(pos.x, pos.y, e.which == 3);
+});
+canvas.addEventListener('touchstart', function(e) {
+	e.preventDefault();
+	var pos = touchPos(canvas, e);
+	mouseDownHelper(pos.x, pos.y, false);
 });
 function mouseDownHelper(x, y, rightClick) {
 	if (state == StateEnum.TITLE) {
@@ -633,6 +634,7 @@ canvas.addEventListener('mousemove', function(e) {
 	mouseMoveHelper(pos.x, pos.y);
 });
 canvas.addEventListener('touchmove', function(e) {
+	e.preventDefault();
 	var pos = touchPos(canvas, e);
 	mouseMoveHelper(pos.x, pos.y);
 });
@@ -648,6 +650,7 @@ window.addEventListener('mouseup', function(e) {
 	mouseUpHelper();
 });
 window.addEventListener('touchend', function(e) {
+	e.preventDefault();
 	mouseUpHelper();
 });
 function mouseUpHelper() {
