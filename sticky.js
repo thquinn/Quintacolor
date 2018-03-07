@@ -1,4 +1,4 @@
-// TODO: Additional game over effects.
+// TODO: Touch events.
 // TODO: More fun score effects.
 // TODO: Better sparkles.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
@@ -11,6 +11,7 @@
 // MECHANIC: Show a random polyomino on the side of the screen. Destroy that polyomino (reflection/rotation permitted) for a big score (or multiplier) bonus!
 //		If the color matches what's shown, get even more points?
 //		If you destroy a shape that is a superset of the shape, you get partial credit.
+// MECHANIC: Upgrades? Diagonal connections, longer paths?
 
 var StateEnum = {
 	TITLE: -2,
@@ -600,7 +601,15 @@ function loop() {
 
 var moused = [];
 var mouseDown = false;
+canvas.addEventListener('touchstart', function(e) {
+	var pos = touchPos(canvas, e);
+	mouseDownHelper(pos.x, pos.y, false);
+});
 canvas.addEventListener('mousedown', function(e) {
+	var pos = mousePos(canvas, e);
+	mouseDownHelper(pos.x, pos.y, e.which == 3);
+});
+function mouseDownHelper(x, y, rightClick) {
 	if (state == StateEnum.TITLE) {
 		state = StateEnum.SETUP;
 		return;
@@ -612,22 +621,36 @@ canvas.addEventListener('mousedown', function(e) {
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
-	if (e.which == 3) { // right click
+	if (rightClick) {
 		selected = [];
 		return;
 	}
 	mouseDown = true;
-	selectCheck(e);
-});
+	selectCheck(x, y);
+}
 canvas.addEventListener('mousemove', function(e) {
+	var pos = mousePos(canvas, e);
+	mouseMoveHelper(pos.x, pos.y);
+});
+canvas.addEventListener('touchmove', function(e) {
+	var pos = touchPos(canvas, e);
+	mouseMoveHelper(pos.x, pos.y);
+});
+function mouseMoveHelper(x, y) {
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
 	if (mouseDown) {
-		selectCheck(e);
+		selectCheck(x, y);
 	}
-});
+}
 window.addEventListener('mouseup', function(e) {
+	mouseUpHelper();
+});
+window.addEventListener('touchend', function(e) {
+	mouseUpHelper();
+});
+function mouseUpHelper() {
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
@@ -649,7 +672,7 @@ window.addEventListener('mouseup', function(e) {
 
 	selected = [];
 	mouseDown = false;
-});
+}
 window.addEventListener('keydown', function(e) {
 	keysPressed.add(e.keyCode);
 	keysDown.add(e.keyCode);
@@ -661,10 +684,11 @@ canvas.addEventListener('contextmenu', function(e) {
 	e.preventDefault();
 });
 
-function selectCheck(e) {
-	var mouse = mousePos(canvas, e);
-	var x = Math.floor((mouse.x - BOARD_PADDING) / PIECE_SIZE);
-	var y = Math.floor(mouse.y / PIECE_SIZE);
+function selectCheck(x, y) {
+	console.log(x);
+	x = Math.floor((x - BOARD_PADDING) / PIECE_SIZE);
+	console.log(x);
+	y = Math.floor(y / PIECE_SIZE);
 	if (selected.length == 0) {
 		selectCheckHelper(x, y);
 		return;

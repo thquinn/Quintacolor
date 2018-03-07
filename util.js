@@ -82,6 +82,13 @@ function mousePos(el, e) {
     y: e.clientY - yPosition,
   };
 }
+function touchPos(el, e) {
+  var rect = el.getBoundingClientRect();
+  return {
+    x: e.touches[0].clientX - rect.left,
+    y: e.touches[0].clientY - rect.top
+  };
+}
 
 class Polyomino {
   constructor(coors) {
