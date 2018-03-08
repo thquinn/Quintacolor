@@ -5,9 +5,12 @@
 // TODO: If you destroy a piece that is a superset of the shape, you get partial credit?
 // TODO: Come up with a name.
 // TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
+//		Blow up pieces around it?
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 
+// MECHANIC: A way to break all connections and settle the board.
+// MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
 // MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal, paths through long pieces, free pathing through empty space?
 // MECHANIC: Wildcards? Rocks?
 
@@ -15,10 +18,12 @@ var StateEnum = {
 	TITLE: -2,
 	SETUP: -1,
 	RUNNING: 0,
-	GAME_OVER: 1,
+	PAUSED: 1,
+	GAME_OVER: 2,
 };
 var KeyBindings = {
 	INCREASE_LEVEL: 32,
+	PAUSE: 80,
 };	
 
 // Board appearance constants.
@@ -47,7 +52,12 @@ var UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
 var UI_POLYOMINO_BLOCK_FILL = .8;
 var UI_GAME_OVER_FADE_TIME = 60;
 // Text constants.
-var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.", "Drag a length-" + COLORS.length + " line through one block of each color.", "Release the mouse button and they will VANISH.", "If it's too easy, press SPACE to go faster and get a multiplier boost.", "", "Click to begin."];
+var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.",
+						 "Drag a length-" + COLORS.length + " line through exactly ONE BLOCK of EACH COLOR.",
+						 "Release the mouse button and they will VANISH.",
+						 "If it's too easy, press SPACE to go faster and get a multiplier boost.",
+						 "",
+						 "Click to begin."];
 // Background constants.
 var BACKGROUND_TILT = Math.PI * .05;
 var BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
@@ -434,6 +444,20 @@ function loop() {
 		}
 	}
 
+	// Pause check.
+	if (keysPressed.has(KeyBindings.PAUSE) && (state == StateEnum.RUNNING || StateEnum.PAUSED)) {
+		state = state == StateEnum.RUNNING ? StateEnum.PAUSED : StateEnum.RUNNING;
+	}
+	if (state == StateEnum.PAUSED) {
+		ctx.textAlign= 'center';
+		ctx.textBaseline = 'middle';
+		ctx.fillStyle = "#FFFFFF";
+		ctx.font = "bold " + (UI_SCORE_FONT_SIZE * 2) + "px Source Sans Pro";
+		ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
+		keysPressed.clear();
+		return;
+	}
+
 	// Game over check.
 	if (state == StateEnum.RUNNING) {
 		spawnBlocked = true;
@@ -553,7 +577,7 @@ function loop() {
 		}
 	}
 	// Draw UI.
-	ctx.textAlign= 'right';
+	ctx.textAlign = 'right';
 	ctx.textBaseline = 'middle';
 	ctx.fillStyle = "#FFFFFF";
 	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
@@ -815,7 +839,7 @@ function fallCheck() {
 // n-to-bounty:
 //	3		4		5		6		7		8		...
 //	1000	3000	6000	10000	15000	21000	...
-// +1000 for each previous bounty
+// +500 for each previous bounty
 //
 // score-to-n:
 //	0		>0		>20K	>60K	>120K	>200K	...
@@ -830,8 +854,11 @@ function nextPolyomino() {
 	score += polyominoBounty * multiplier;
 	polyominosScored++;
 	var n = Math.floor((Math.sqrt(score - 1 + 2500) + 350) / 100); // thanks wolfram alpha
-	polyomino = Polyomino.random(n);
-	polyominoBounty = 500 * (n - 2) * (n - 1) + 1000 * polyominosScored; // thanks wolfram alpha
+	var oldPolyomino = polyomino;
+	while (polyomino.representations.has(oldPolyomino.representations.values().next().value)) {
+		polyomino = Polyomino.random(n);
+	}
+	polyominoBounty = 500 * (n - 2) * (n - 1) + 500 * polyominosScored; // thanks wolfram alpha
 }
 function drawPolyominoUI() {
 	// Draw polyomino.
