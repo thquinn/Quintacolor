@@ -1,17 +1,14 @@
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
-// TODO: Better sparkles, better sparkle -> quake meter attraction.
-// TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
+// TODO: Better sparkles.
 // TODO: Sound?
 // TODO: More fun score effects.
 // TODO: Come up with a name.
-// TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
-//		Blow up pieces around it?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 
 // MECHANIC: A garbage block that only clears when you quake?
 // MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
-// MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal occasional polyomino breakup, paths through long polyominos, free pathing through empty space?
 // MECHANIC: Wildcards? Rocks?
+// MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal occasional polyomino breakup, paths through long polyominos, free pathing through empty space?
 
 var StateEnum = {
 	TITLE: -2,
@@ -55,8 +52,8 @@ var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 var UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
 var UI_POLYOMINO_BLOCK_FILL = .8;
 var UI_GAME_OVER_FADE_TIME = 60;
-var UI_QUAKE_METER_WIDTH = PIECE_SIZE * 4;
-var UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 5;
+var UI_QUAKE_METER_WIDTH = PIECE_SIZE * 6;
+var UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 6;
 var UI_QUAKE_METER_X = canvas.width - BOARD_PADDING - UI_QUAKE_METER_WIDTH;
 var UI_QUAKE_METER_Y = canvas.height * .55;
 var UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
@@ -110,8 +107,8 @@ var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
 var CONNECTION_RATE = .01;
 var BOUNTY_POLYOMINOS = false;
 var QUAKE_METER = true;
-var QUAKE_METER_SIZE_INITIAL = 100;
-var QUAKE_METER_SIZE_INCREMENT = 50;
+var QUAKE_METER_SIZE_INITIAL = 125;
+var QUAKE_METER_SIZE_INCREMENT = 25;
 // 2D HTML5 context setup.
 var ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
@@ -443,10 +440,9 @@ class Sparkle {
 		this.alpha = 1 + EFFECTS_SPARKLE_FADE_SPEED;
 	}
 	update() {
-		this.dx *= EFFECTS_SPARKLE_HORIZONTAL_DRAG;
-		this.dy -= EFFECTS_SPARKLE_LIFT;
 		this.x += this.dx;
 		this.y += this.dy;
+		this.dx *= EFFECTS_SPARKLE_HORIZONTAL_DRAG;
 		this.alpha = Math.max(0, this.alpha - EFFECTS_SPARKLE_FADE_SPEED);
 		if (QUAKE_METER && quakeMeterAppearance < quakeMeterSize) {
 			var attract = Math.pow(1 - this.alpha, 4);
@@ -455,6 +451,8 @@ class Sparkle {
 			var hypot = Math.hypot(this.x - UI_QUAKE_METER_ATTRACT_X, this.y - UI_QUAKE_METER_ATTRACT_Y);
 			var closeAlpha = hypot < EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS ? (hypot / EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS) : 1;
 			this.alpha = Math.min(this.alpha, closeAlpha);
+		} else {
+			this.dy -= EFFECTS_SPARKLE_LIFT;
 		}
 	}
 	draw() {
@@ -514,6 +512,9 @@ function loop() {
 		if (gameOver) {
 			selected = [];
 			state = StateEnum.GAME_OVER;
+			if (localStorage.highScore == null || localStorage.highScore < score) {
+				localStorage.highScore = score;
+			}
 		}
 	}
 
@@ -670,8 +671,8 @@ function loop() {
 			ctx.textAlign= 'right';
 			ctx.textBaseline = 'top';
 			ctx.font = (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-			ctx.fillText("uake!", UI_QUAKE_TEXT_X + offsetX, UI_QUAKE_TEXT_Y + offsetY);
-			var quakeWidth = ctx.measureText("uake!").width;
+			ctx.fillText("uake ready!", UI_QUAKE_TEXT_X + offsetX, UI_QUAKE_TEXT_Y + offsetY);
+			var quakeWidth = ctx.measureText("uake ready!").width;
 			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
 			ctx.fillText("Q", UI_QUAKE_TEXT_X - quakeWidth + offsetX, UI_QUAKE_TEXT_Y + offsetY);
 		}
@@ -698,12 +699,15 @@ function loop() {
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'right';
 		ctx.textBaseline = 'alphabetic';
-		ctx.fillStyle = "rgba(192, 0, 96, " + (gameOverClock / UI_GAME_OVER_FADE_TIME) + ")";
+		ctx.fillStyle = "rgba(155, 90, 110, " + (gameOverClock / UI_GAME_OVER_FADE_TIME) + ")";
 		ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 		ctx.fillText("GAME OVER", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+		var gameOverWidth = ctx.measureText("GAME OVER").width;
 		ctx.textBaseline = 'top';
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
 		ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+		ctx.textAlign= 'left';
+		ctx.fillText("your high score: " + parseInt(localStorage.highScore).toLocaleString(), canvas.width - BOARD_PADDING - gameOverWidth, canvas.height - BOARD_PADDING);
 	}
 	// Draw effects.
 	effects.update();
@@ -711,7 +715,7 @@ function loop() {
 
 	// Draw title screen.
 	if (titleFade > 0) {
-		ctx.fillStyle = "rgba(195, 220, 245, " + titleFade + ")";
+		ctx.fillStyle = "rgba(195, 220, 240, " + titleFade + ")";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 		if (state != StateEnum.TITLE) {
 			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
@@ -765,7 +769,7 @@ function mouseDownHelper(x, y, rightClick) {
 		selected = [];
 		return;
 	}
-	var quakeTextWidth = UI_SCORE_FONT_SIZE * 1.5, quakeTextHeight = UI_SCORE_FONT_SIZE / 2;
+	var quakeTextWidth = UI_SCORE_FONT_SIZE * 3, quakeTextHeight = UI_SCORE_FONT_SIZE / 2;
 	if (x >= UI_QUAKE_TEXT_X - quakeTextWidth && x <= UI_QUAKE_TEXT_X && y >= UI_QUAKE_TEXT_Y && y <= UI_QUAKE_TEXT_Y + quakeTextHeight) {
 		keysPressed.add(KeyBindings.QUAKE);
 		return;
