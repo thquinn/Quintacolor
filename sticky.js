@@ -1,17 +1,16 @@
-// TODO: More fun score effects.
-// TODO: Better sparkles.
+// TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
+// TODO: Better sparkles, better sparkle -> quake meter attraction.
 // TODO: Store highscore: http://html5doctor.com/storing-data-the-simple-html5-way-and-a-few-tricks-you-might-not-have-known/
 // TODO: Sound?
-// TODO: If you destroy a piece that is a superset of the shape, you get partial credit?
+// TODO: More fun score effects.
 // TODO: Come up with a name.
 // TODO: Some kind of reward, visual or score-wise, for exploding large shapes.
 //		Blow up pieces around it?
-// TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 
-// MECHANIC: A way to break all connections and settle the board.
+// MECHANIC: A garbage block that only clears when you quake?
 // MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
-// MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal, paths through long pieces, free pathing through empty space?
+// MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal occasional polyomino breakup, paths through long polyominos, free pathing through empty space?
 // MECHANIC: Wildcards? Rocks?
 
 var StateEnum = {
@@ -24,7 +23,8 @@ var StateEnum = {
 var KeyBindings = {
 	INCREASE_LEVEL: 32,
 	PAUSE: 80,
-};	
+	QUAKE: 81,
+}
 
 // Board appearance constants.
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
@@ -33,24 +33,38 @@ var BASE_COLOR = '#707090';
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
 var PIECE_SIZE = 60;
-var STROKE_WIDTH = 10;
+var STROKE_WIDTH = PIECE_SIZE / 6;
 var BOARD_PADDING = PIECE_SIZE;
 var CONNECTION_APPEARANCE_RATE = .2;
 var SETUP_SPAWN_RATE = 1; // frames per piece
 var POST_SETUP_PAUSE = 45;
 var SELECTION_OPACITY = .4;
 var SELECTION_END_RADIUS = PIECE_SIZE / 6;
-var SELECTION_INVALID_COLOR = '#FFC0C0';
-var BOARD_GAME_OVER_DESATURATION = .925;
+var SELECTION_INVALID_COLOR = '#FFC8C8';
+var BOARD_GAME_OVER_DESATURATION = .95;
+var UI_WIDTH = PIECE_SIZE * 8;
+// Canvas setup.
+var canvas = document.getElementById('canvas');
+canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
+canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 // UI constants.
 var UI_TITLE_FADE_RATE = .025;
-var UI_WIDTH = PIECE_SIZE * 8;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 var UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
 var UI_POLYOMINO_BLOCK_FILL = .8;
 var UI_GAME_OVER_FADE_TIME = 60;
+var UI_QUAKE_METER_WIDTH = PIECE_SIZE * 4;
+var UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 5;
+var UI_QUAKE_METER_X = canvas.width - BOARD_PADDING - UI_QUAKE_METER_WIDTH;
+var UI_QUAKE_METER_Y = canvas.height * .55;
+var UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
+var UI_QUAKE_METER_ATTRACT_X = UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2;
+var UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
+var UI_QUAKE_METER_SHAKE = UI_QUAKE_METER_HEIGHT / 10;
+var UI_QUAKE_TEXT_X = canvas.width - BOARD_PADDING;
+var UI_QUAKE_TEXT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT * .75;
 // Text constants.
 var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.",
 						 "Drag a length-" + COLORS.length + " line through exactly ONE BLOCK of EACH COLOR.",
@@ -58,7 +72,8 @@ var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLIC
 						 "If it's too easy, press SPACE to go faster and get a multiplier boost.",
 						 "",
 						 "Click to begin."];
-// Background constants.
+// Background appearance.
+var BACKGROUND_COLOR = "#C3DCF0";
 var BACKGROUND_TILT = Math.PI * .05;
 var BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
 var BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
@@ -76,6 +91,9 @@ var EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 800;
 var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
 var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
 var EFFECTS_SPARKLE_FADE_SPEED = .01;
+var EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS = PIECE_SIZE * 4;
+var EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 4;
+var EFFECTS_QUAKE_FADE_SPEED = .02;
 // Gameplay constants.
 var SETUP_ROWS = 6;
 var COLUMN_SELECTION_WEIGHT_EXPONENT = 5;
@@ -90,15 +108,15 @@ var MULTIPLIER_INCREMENT = .05;
 var MULTIPLIER_FORCE_INCREMENT = .1;
 var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
 var CONNECTION_RATE = .01;
-
-var canvas = document.getElementById('canvas');
-canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
-canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
+var BOUNTY_POLYOMINOS = false;
+var QUAKE_METER = true;
+var QUAKE_METER_SIZE_INITIAL = 100;
+var QUAKE_METER_SIZE_INCREMENT = 50;
+// 2D HTML5 context setup.
 var ctx = canvas.getContext('2d');
-ctx.lineWidth = STROKE_WIDTH;
 ctx.lineCap = "square";
 
-var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip;
+var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, screenShakeX, screenShakeY;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
@@ -123,6 +141,12 @@ function start() {
 	polyomino = null;
 	nextPolyomino();
 	showPolyominoTooltip = false;
+	quakeMeterSize = QUAKE_METER_SIZE_INITIAL;
+	quakeMeter = 0;
+	quakeMeterAppearance = 0;
+	quakeScreenShake = 0;
+	screenShakeX = 0;
+	screenShakeY = 0;
 }
 
 class Piece {
@@ -230,30 +254,35 @@ class Piece {
 		var trueY = this.y - this.fallDistance;
 		// Stroke.
 		ctx.fillStyle = STROKE_COLORS[this.color];
-		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE, trueY * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + screenShakeX, trueY * PIECE_SIZE + screenShakeY, PIECE_SIZE, PIECE_SIZE);
 		// Horizontal fill.
 		ctx.fillStyle = COLORS[this.color];
-		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]), trueY * PIECE_SIZE + STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
+		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]) + screenShakeX, trueY * PIECE_SIZE + STROKE_WIDTH + screenShakeY, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
 		// Vertical fill.
 		ctx.fillStyle = COLORS[this.color];
-		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]), PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
+		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH + screenShakeX, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]) + screenShakeY, PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
 		// Selection overlay.
 		for (let s of selected) {
 			if (board[s[0]][s[1]].root == this.root) {
 				ctx.fillStyle = "rgba(255, 255, 255, " + SELECTION_OPACITY + ")";
-				ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE, (this.y - this.fallDistance) * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+				ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + screenShakeX, (this.y - this.fallDistance) * PIECE_SIZE + screenShakeY, PIECE_SIZE, PIECE_SIZE);
 				break;
 			}
 		}
 	}
 	destroy() {
 		score = Math.round(score + this.root.children.size * 100 * multiplier);
-		if (polyomino.isThis(this.root)) {
+		if (BOUNTY_POLYOMINOS && polyomino.isThis(this.root)) {
 			nextPolyomino();
+		}
+		var quakeMeterFill = 0;
+		if (QUAKE_METER && this.root.children.size > 1) {
+			quakeMeterFill = this.root.children.size - 1;
+			quakeMeter = Math.min(quakeMeter + quakeMeterFill, quakeMeterSize);
 		}
 		for (let child of this.root.children) {
 			board[child.x][child.y] = null;
-			effects.vanish(child.x, child.y);
+			effects.vanish(child.x, child.y, quakeMeterFill / this.root.children.size);
 		}
 	}
 }
@@ -271,7 +300,7 @@ class Background {
 		}
 	}
 	draw() {
-		ctx.fillStyle = "#D0E8FF";
+		ctx.fillStyle = BACKGROUND_COLOR;
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 		ctx.save();
 		ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -340,12 +369,14 @@ class Effects {
 		this.vanishes = [];
 		this.sparkles = [];
 	}
-	vanish(x, y) {
+	vanish(x, y, quakeMeterFill) {
 		this.vanishes.push(new Vanish(x, y));
-		for (var i = 0; i < EFFECTS_SPARKLE_COUNT; i++) {
-			var sx = BOARD_PADDING + x * PIECE_SIZE + Math.random() * PIECE_SIZE;
-			var sy = y * PIECE_SIZE + Math.random() * PIECE_SIZE;
-			this.sparkles.push(new Sparkle(sx, sy));
+		if (!QUAKE_METER || quakeMeterFill > 0) {
+			for (var i = 0; i < EFFECTS_SPARKLE_COUNT; i++) {
+				var sx = BOARD_PADDING + x * PIECE_SIZE + Math.random() * PIECE_SIZE;
+				var sy = y * PIECE_SIZE + Math.random() * PIECE_SIZE;
+				this.sparkles.push(new Sparkle(sx, sy, quakeMeterFill / EFFECTS_SPARKLE_COUNT));
+			}
 		}
 	}
 	update() {
@@ -358,6 +389,7 @@ class Effects {
 		for (var i = this.sparkles.length - 1; i >= 0; i--) {
 			this.sparkles[i].update();
 			if (this.sparkles[i].alpha == 0) {
+				quakeMeterAppearance = Math.min(quakeMeterSize, quakeMeterAppearance + this.sparkles[i].quakeMeterFill);
 				this.sparkles.splice(i, 1);
 			}
 		}
@@ -401,9 +433,10 @@ class Vanish {
 	}
 }
 class Sparkle {
-	constructor(x, y) {
+	constructor(x, y, quakeMeterFill) {
 		this.x = x;
 		this.y = y;
+		this.quakeMeterFill = quakeMeterFill;
 		this.dx = Math.randFloat(-EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE, EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE);
 		this.dy = -EFFECTS_SPARKLE_INIT_VELOCITY;
 		this.dy += Math.randFloat(-EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE, EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE)
@@ -415,6 +448,14 @@ class Sparkle {
 		this.x += this.dx;
 		this.y += this.dy;
 		this.alpha = Math.max(0, this.alpha - EFFECTS_SPARKLE_FADE_SPEED);
+		if (QUAKE_METER && quakeMeterAppearance < quakeMeterSize) {
+			var attract = Math.pow(1 - this.alpha, 4);
+			this.x = UI_QUAKE_METER_ATTRACT_X * attract + this.x * (1 - attract);
+			this.y = UI_QUAKE_METER_ATTRACT_Y * attract * 2 + this.y * (1 - attract * 2);
+			var hypot = Math.hypot(this.x - UI_QUAKE_METER_ATTRACT_X, this.y - UI_QUAKE_METER_ATTRACT_Y);
+			var closeAlpha = hypot < EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS ? (hypot / EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS) : 1;
+			this.alpha = Math.min(this.alpha, closeAlpha);
+		}
 	}
 	draw() {
 		ctx.beginPath();
@@ -476,6 +517,15 @@ function loop() {
 		}
 	}
 
+	// Quake?
+	if (quakeMeter < quakeMeterAppearance) {
+		quakeMeterAppearance = quakeMeter * .25 + quakeMeterAppearance * .75;
+	}
+	if (state == StateEnum.RUNNING && QUAKE_METER && keysPressed.has(KeyBindings.QUAKE) && quakeMeter >= quakeMeterSize) {
+		quake();
+		quakeMeter = 0;
+		quakeMeterSize += QUAKE_METER_SIZE_INCREMENT;
+	}
 	// Update pieces.	
 	if (state == StateEnum.SETUP || state == StateEnum.RUNNING) {
 		for (var x = 0; x < BOARD_WIDTH; x++) {
@@ -517,6 +567,15 @@ function loop() {
 		}
 	}
 	
+	// Screen shake.
+	if (quakeScreenShake > 0) {
+		screenShakeX = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
+		screenShakeY = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
+		quakeScreenShake = Math.max(0, quakeScreenShake - EFFECTS_QUAKE_FADE_SPEED);
+	} else {
+		screenShakeX = 0;
+		screenShakeY = 0;
+	}
 	// Draw pieces.
 	for (var x = 0; x < BOARD_WIDTH; x++) {
 		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
@@ -536,7 +595,7 @@ function loop() {
 				if (board[x][y] == null) {
 					continue;
 				}
-				ctx.fillRect(BOARD_PADDING + x * PIECE_SIZE, (y - board[x][y].fallDistance) * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+				ctx.fillRect(BOARD_PADDING + x * PIECE_SIZE + screenShakeX, (y - board[x][y].fallDistance) * PIECE_SIZE + screenShakeY, PIECE_SIZE, PIECE_SIZE);
 			}
 		}
 		ctx.globalCompositeOperation = 'source-over';
@@ -544,10 +603,7 @@ function loop() {
 	// Draw base.
 	var baseY = BOARD_HEIGHT * PIECE_SIZE;
 	ctx.fillStyle = BASE_COLOR;
-	ctx.fillRect(BOARD_PADDING, baseY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY);
-	// Draw effects.
-	effects.update();
-	effects.draw();
+	ctx.fillRect(BOARD_PADDING + screenShakeX, baseY + screenShakeY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY + EFFECTS_QUAKE_STRENGTH);
 	// Draw selection path.
 	if (selected.length > 1) {
 		var pathColor = "#FFFFFF";
@@ -561,6 +617,7 @@ function loop() {
 			selectedColors.add(color);
 		}
 		ctx.strokeStyle = pathColor;
+		ctx.lineWidth = STROKE_WIDTH;
 		ctx.beginPath();
 		var x, y;
 		for (var i = 0; i < selected.length; i++) {
@@ -586,9 +643,6 @@ function loop() {
 	var scoreWidth = ctx.measureText(score).width;
 	ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
-	ctx.fillStyle = "#9090F0";
-	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
-	ctx.fillText('Multiplier: ' + Math.round(multiplier * 100) + '%', canvas.width - BOARD_PADDING, canvas.height * .5625);
 	var levelPercent = levelTimer / LEVEL_RATE;
 	var levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
 	ctx.beginPath();
@@ -598,12 +652,49 @@ function loop() {
 	ctx.fill();
 	ctx.textAlign = 'center';
 	ctx.fillStyle = "#9090F0";
-	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-	ctx.fillText(level, levelX, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
 	ctx.fillText("Level", levelX, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
-	drawPolyominoUI();
-	// Draw game over?
+	ctx.fillText("Multiplier", levelX - UI_LEVEL_CIRCLE_RADIUS * 3, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
+	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+	ctx.fillText(level, levelX, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
+	ctx.fillText(Math.round(multiplier * 100) + '%', levelX - UI_LEVEL_CIRCLE_RADIUS * 3, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
+	if (BOUNTY_POLYOMINOS) {
+		drawPolyominoUI();
+	}
+	if (QUAKE_METER) {
+		ctx.fillStyle = "#9090F0";
+		var offsetX = 0, offsetY = 0;
+		if (quakeMeter >= quakeMeterSize) {
+			offsetX = Math.randFloat(-1, 1) * UI_QUAKE_METER_SHAKE;
+			offsetY = Math.randFloat(-1, 1) * UI_QUAKE_METER_SHAKE;
+			ctx.textAlign= 'right';
+			ctx.textBaseline = 'top';
+			ctx.font = (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+			ctx.fillText("uake!", UI_QUAKE_TEXT_X + offsetX, UI_QUAKE_TEXT_Y + offsetY);
+			var quakeWidth = ctx.measureText("uake!").width;
+			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+			ctx.fillText("Q", UI_QUAKE_TEXT_X - quakeWidth + offsetX, UI_QUAKE_TEXT_Y + offsetY);
+		}
+		var quakeMeterFillPercent = quakeMeterAppearance / quakeMeterSize;
+		ctx.fillRect(UI_QUAKE_METER_X + UI_QUAKE_METER_STROKE / 2 + offsetX, UI_QUAKE_METER_Y + offsetY, (UI_QUAKE_METER_WIDTH - UI_QUAKE_METER_STROKE) * quakeMeterFillPercent, UI_QUAKE_METER_HEIGHT);
+		ctx.lineWidth = UI_QUAKE_METER_STROKE;
+		ctx.strokeStyle = "#FFFFFF";
+		ctx.beginPath();
+		ctx.arc(UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH - UI_QUAKE_METER_HEIGHT / 2 + offsetX,
+				UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2 + offsetY,
+				UI_QUAKE_METER_HEIGHT / 2,
+				1.5 * Math.PI,
+				0.5 * Math.PI,
+				false);
+		ctx.arc(UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2 + offsetX,
+				UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2 + offsetY,
+				UI_QUAKE_METER_HEIGHT / 2,
+				0.5 * Math.PI,
+				1.5 * Math.PI,
+				false);
+		ctx.closePath();
+		ctx.stroke();
+	}
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'right';
 		ctx.textBaseline = 'alphabetic';
@@ -614,10 +705,13 @@ function loop() {
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
 		ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
 	}
+	// Draw effects.
+	effects.update();
+	effects.draw();
 
 	// Draw title screen.
 	if (titleFade > 0) {
-		ctx.fillStyle = "rgba(208, 232, 255, " + titleFade + ")";
+		ctx.fillStyle = "rgba(195, 220, 245, " + titleFade + ")";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 		if (state != StateEnum.TITLE) {
 			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
@@ -633,7 +727,7 @@ function loop() {
 		}
 	}
 
-	if (state != StateEnum.TITLE) {
+	if (state != StateEnum.TITLE && state != StateEnum.PAUSED) {
 		clock++;
 	}
 	if (state == StateEnum.GAME_OVER) {
@@ -671,6 +765,11 @@ function mouseDownHelper(x, y, rightClick) {
 		selected = [];
 		return;
 	}
+	var quakeTextWidth = UI_SCORE_FONT_SIZE * 1.5, quakeTextHeight = UI_SCORE_FONT_SIZE / 2;
+	if (x >= UI_QUAKE_TEXT_X - quakeTextWidth && x <= UI_QUAKE_TEXT_X && y >= UI_QUAKE_TEXT_Y && y <= UI_QUAKE_TEXT_Y + quakeTextHeight) {
+		keysPressed.add(KeyBindings.QUAKE);
+		return;
+	}
 	mouseDown = true;
 	selectCheck(x, y);
 }
@@ -686,7 +785,7 @@ canvas.addEventListener('touchmove', function(e) {
 	mouseMoveHelper(pos.x, pos.y);
 });
 function mouseMoveHelper(x, y) {
-	showPolyominoTooltip = x > canvas.width - BOARD_PADDING - UI_POLYOMINO_AREA_SIZE && y < BOARD_PADDING + UI_POLYOMINO_AREA_SIZE;
+	showPolyominoTooltip = BOUNTY_POLYOMINOS && x > canvas.width - BOARD_PADDING - UI_POLYOMINO_AREA_SIZE && y < BOARD_PADDING + UI_POLYOMINO_AREA_SIZE;
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
@@ -845,6 +944,9 @@ function fallCheck() {
 //	0		>0		>20K	>60K	>120K	>200K	...
 //	3		4		5		6		7		8		...
 function nextPolyomino() {
+	if (!BOUNTY_POLYOMINOS) {
+		return;
+	}
 	if (polyomino == null) {
 		polyomino = Polyomino.random(3);
 		polyominoBounty = 1000;
@@ -890,6 +992,21 @@ function drawPolyominoUI() {
 		ctx.fillText('be rotated or reflected) to gain this', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5));
 		ctx.fillText('many points, times your multiplier', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5) * 2);
 	}
+}
+
+function quake() {
+	for (var x = 0; x < BOARD_WIDTH; x++) {
+		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
+			if (board[x][y] == null) {
+				continue;
+			}
+			board[x][y].connection.fill(0);
+			board[x][y].root = board[x][y];
+			board[x][y].children = new Set([board[x][y]]);
+		}
+	}
+	fallCheck();
+	quakeScreenShake = 1;
 }
 
 start();
