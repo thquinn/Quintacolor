@@ -1,12 +1,13 @@
+// TODO: Space to quake.
 // TODO: Quake is a little underwhelming. It should be more powerful.
 // TODO: Is multiplier overemphasized? Maybe make it a smaller part of the UI, and 
 // TODO: Partial meter shake when almost full
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Better sparkles.
-// TODO: Sound?
+// TODO: Sound? A Meteos-style track that has various intensity levels?
 // TODO: More fun score effects.
-// TODO: Come up with a name.
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
+// TODO: Google Analytics on the page.
 
 // MECHANIC: A garbage block that only clears when you quake?
 // MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
@@ -27,6 +28,24 @@ var KeyBindings = {
 	QUAKE: 81,
 }
 
+// Gameplay constants.
+var SETUP_ROWS = 6;
+var COLUMN_SELECTION_WEIGHT_EXPONENT = 5;
+var COLOR_SELECTION_WEIGHT_MIN = 10;
+var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
+var INITIAL_FALL_VELOCITY = .1;
+var GRAVITY = .005;
+var LEVEL_RATE = 40 * 60; // 40 seconds
+var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
+var SPAWN_RATE_INCREMENT = .1;
+var MULTIPLIER_INCREMENT = .05;
+var MULTIPLIER_FORCE_INCREMENT = .1;
+var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
+var CONNECTION_RATE = .01;
+var BOUNTY_POLYOMINOS = false;
+var QUAKE_METER = true;
+var QUAKE_METER_SIZE_INITIAL = 100;
+var QUAKE_METER_SIZE_INCREMENT = 25;
 // Board appearance constants.
 var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
@@ -49,6 +68,7 @@ var canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
 // UI constants.
+var UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
 var UI_TITLE_FADE_RATE = .025;
 var UI_SCORE_DIGITS = 10;
 var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
@@ -70,6 +90,7 @@ var UI_QUAKE_TEXT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT * .75;
 var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.",
 						 "Drag a length-" + COLORS.length + " line through exactly ONE BLOCK of EACH COLOR.",
 						 "Release the mouse button and they will VANISH.",
+						 "Try to last AS LONG AS YOU CAN.",
 						 "",
 						 "Click to begin."];
 // Background appearance.
@@ -94,28 +115,14 @@ var EFFECTS_SPARKLE_FADE_SPEED = .01;
 var EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS = PIECE_SIZE * 4;
 var EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 4;
 var EFFECTS_QUAKE_FADE_SPEED = .02;
-// Gameplay constants.
-var SETUP_ROWS = 6;
-var COLUMN_SELECTION_WEIGHT_EXPONENT = 5;
-var COLOR_SELECTION_WEIGHT_MIN = 10;
-var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
-var INITIAL_FALL_VELOCITY = .1;
-var GRAVITY = .005;
-var LEVEL_RATE = 40 * 60; // 40 seconds
-var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
-var SPAWN_RATE_INCREMENT = .1;
-var MULTIPLIER_INCREMENT = .05;
-var MULTIPLIER_FORCE_INCREMENT = .1;
-var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
-var CONNECTION_RATE = .01;
-var BOUNTY_POLYOMINOS = false;
-var QUAKE_METER = true;
-var QUAKE_METER_SIZE_INITIAL = 100;
-var QUAKE_METER_SIZE_INCREMENT = 25;
 // 2D HTML5 context setup.
 var ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
+// Asset setup.
+var ASSET_IMAGE_LOGO = document.createElement("img");
+ASSET_IMAGE_LOGO.src = "https://thquinn.github.io/resources/images/quintacolor/logo.png";
 
+// Initialize all game variables.
 var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, screenShakeX, screenShakeY;
 function start() {
 	clock = 0;
@@ -487,7 +494,7 @@ function loop() {
 	}
 
 	// Pause check.
-	if (keysPressed.has(KeyBindings.PAUSE) && (state == StateEnum.RUNNING || StateEnum.PAUSED)) {
+	if (keysPressed.has(KeyBindings.PAUSE) && (state == StateEnum.RUNNING || state == StateEnum.PAUSED)) {
 		state = state == StateEnum.RUNNING ? StateEnum.PAUSED : StateEnum.RUNNING;
 	}
 	if (state == StateEnum.PAUSED) {
@@ -718,17 +725,19 @@ function loop() {
 
 	// Draw title screen.
 	if (titleFade > 0) {
-		ctx.fillStyle = "rgba(195, 220, 240, " + titleFade + ")";
+		ctx.fillStyle = "rgba(40, 40, 40, " + titleFade + ")";
 		ctx.fillRect(0, 0, canvas.width, canvas.height);
 		if (state != StateEnum.TITLE) {
 			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
 		}
+		var logoX = canvas.width / 2 - ASSET_IMAGE_LOGO.width / 2;
+		ctx.globalAlpha = titleFade;
+		ctx.drawImage(ASSET_IMAGE_LOGO, logoX, canvas.height / 5, UI_TITLE_LOGO_SIZE, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width);
+		ctx.globalAlpha = 1;
 		ctx.textAlign= 'center';
 		ctx.textBaseline = 'middle';
-		ctx.fillStyle = "rgba(144, 144, 240, " + titleFade + ")";
-		ctx.font = "bold " + (UI_SCORE_FONT_SIZE * 2) + "px Source Sans Pro";
-		ctx.fillText("Quintacolor", canvas.width / 2, canvas.height / 3);
-		ctx.font = (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+		ctx.fillStyle = "rgba(255, 255, 255, " + titleFade + ")";
+		ctx.font = "200 " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
 		for (var i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
 			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
 		}
