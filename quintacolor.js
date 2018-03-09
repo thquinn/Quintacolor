@@ -1,3 +1,6 @@
+// TODO: Quake is a little underwhelming. It should be more powerful.
+// TODO: Is multiplier overemphasized? Maybe make it a smaller part of the UI, and 
+// TODO: Partial meter shake when almost full
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Better sparkles.
 // TODO: Sound?
@@ -9,6 +12,7 @@
 // MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
 // MECHANIC: Wildcards? Rocks?
 // MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal occasional polyomino breakup, paths through long polyominos, free pathing through empty space?
+// MECHANIC: Make one of the colors different in some way?
 
 var StateEnum = {
 	TITLE: -2,
@@ -29,7 +33,7 @@ var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 var BASE_COLOR = '#707090';
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
-var PIECE_SIZE = 60;
+var PIECE_SIZE = 80;
 var STROKE_WIDTH = PIECE_SIZE / 6;
 var BOARD_PADDING = PIECE_SIZE;
 var CONNECTION_APPEARANCE_RATE = .2;
@@ -107,7 +111,7 @@ var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
 var CONNECTION_RATE = .01;
 var BOUNTY_POLYOMINOS = false;
 var QUAKE_METER = true;
-var QUAKE_METER_SIZE_INITIAL = 125;
+var QUAKE_METER_SIZE_INITIAL = 100;
 var QUAKE_METER_SIZE_INCREMENT = 25;
 // 2D HTML5 context setup.
 var ctx = canvas.getContext('2d');
@@ -724,7 +728,7 @@ function loop() {
 		ctx.textBaseline = 'middle';
 		ctx.fillStyle = "rgba(144, 144, 240, " + titleFade + ")";
 		ctx.font = "bold " + (UI_SCORE_FONT_SIZE * 2) + "px Source Sans Pro";
-		ctx.fillText("Game", canvas.width / 2, canvas.height / 3);
+		ctx.fillText("Quintacolor", canvas.width / 2, canvas.height / 3);
 		ctx.font = (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
 		for (var i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
 			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
