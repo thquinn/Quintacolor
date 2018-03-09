@@ -33,7 +33,7 @@ var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 var BASE_COLOR = '#707090';
 var BOARD_WIDTH = 15;
 var BOARD_HEIGHT = 12;
-var PIECE_SIZE = 80;
+var PIECE_SIZE = 60;
 var STROKE_WIDTH = PIECE_SIZE / 6;
 var BOARD_PADDING = PIECE_SIZE;
 var CONNECTION_APPEARANCE_RATE = .2;
@@ -70,7 +70,6 @@ var UI_QUAKE_TEXT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT * .75;
 var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.",
 						 "Drag a length-" + COLORS.length + " line through exactly ONE BLOCK of EACH COLOR.",
 						 "Release the mouse button and they will VANISH.",
-						 "If it's too easy, press SPACE to go faster and get a multiplier boost.",
 						 "",
 						 "Click to begin."];
 // Background appearance.
