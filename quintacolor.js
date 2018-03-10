@@ -1,13 +1,24 @@
-// TODO: Space to quake.
-// TODO: Quake is a little underwhelming. It should be more powerful.
-// TODO: Is multiplier overemphasized? Maybe make it a smaller part of the UI, and 
-// TODO: Partial meter shake when almost full
+// TODO: Fix seams between faces -- make the sides a little taller and the bottoms a little wider.
+// TODO: Improve the vanishes for the new 3D look. A buncha triangles?
+// TODO: Space to quake, move level increase somewhere else.
+// TODO: Click the level indicator to level up.
+// TODO: Better on-screen buttons.
+// TODO: Another pass on quake effects and the quake meter.
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Better sparkles.
+// TODO: Do another pass on colors.
 // TODO: Sound? A Meteos-style track that has various intensity levels?
 // TODO: More fun score effects.
+// TODO: Fix mouse coordinates on scaled canvas in Firefox.
+// TODO: Drawing optimizations
+//		Only drawing a single center square if there are no connections or connections only in one direction
+//		Skipping the side and/or bottom face draw if there's a block there
+//		Try to rid of the second board canvas which seems necessary because the saturation blend mode is changing the alpha channel.
+// TODO: Quinticolor? Quintachrome? Quintichrome? Quintic? Just... Quinta? That's apparently the name of a board game. Would be nice if it were a Q and exactly five letters. Quinth? Quinnt?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Google Analytics on the page.
+
+// KNOWN BUG: Text alignment is messed up in Firefox. Could maybe be fixed by using different baselines.
 
 // MECHANIC: A garbage block that only clears when you quake?
 // MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
@@ -29,30 +40,32 @@ var KeyBindings = {
 }
 
 // Gameplay constants.
+var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
+var BOARD_WIDTH = 15;
+var BOARD_HEIGHT = 12;
 var SETUP_ROWS = 6;
-var COLUMN_SELECTION_WEIGHT_EXPONENT = 5;
+var COLUMN_SELECTION_WEIGHT_EXPONENT = 4;
 var COLOR_SELECTION_WEIGHT_MIN = 10;
 var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
-var INITIAL_FALL_VELOCITY = .1;
 var GRAVITY = .005;
+var INITIAL_FALL_VELOCITY = .1;
 var LEVEL_RATE = 40 * 60; // 40 seconds
 var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 var SPAWN_RATE_INCREMENT = .1;
 var MULTIPLIER_INCREMENT = .05;
-var MULTIPLIER_FORCE_INCREMENT = .1;
+var MULTIPLIER_FORCE_INCREMENT = .12;
 var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
-var CONNECTION_RATE = .01;
+var CONNECTION_RATE = .015;
 var BOUNTY_POLYOMINOS = false;
 var QUAKE_METER = true;
 var QUAKE_METER_SIZE_INITIAL = 100;
 var QUAKE_METER_SIZE_INCREMENT = 25;
 // Board appearance constants.
-var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
-var STROKE_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
-var BASE_COLOR = '#707090';
-var BOARD_WIDTH = 15;
-var BOARD_HEIGHT = 12;
 var PIECE_SIZE = 60;
+var FRONT_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
+var SIDE_COLORS = ['#E50000', '#1EA0E5', '#D6BA00', '#00B80F', '#7339E5'];
+var BOTTOM_COLORS = ['#CC0000', '#1B8ECC', '#BDA400', '#009E0D', '#6633CC'];
+var BASE_COLOR = '#707090';
 var STROKE_WIDTH = PIECE_SIZE / 6;
 var BOARD_PADDING = PIECE_SIZE;
 var CONNECTION_APPEARANCE_RATE = .2;
@@ -63,10 +76,20 @@ var SELECTION_END_RADIUS = PIECE_SIZE / 6;
 var SELECTION_INVALID_COLOR = '#FFC8C8';
 var BOARD_GAME_OVER_DESATURATION = .95;
 var UI_WIDTH = PIECE_SIZE * 8;
+var BOARD_3D = true;
+var PERSPECTIVE_MAX_WIDTH = .5;
+var PERSPECTIVE_MIN_HEIGHT = 0;
+var PERSPECTIVE_MAX_HEIGHT = .33;
 // Canvas setup.
 var canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
+var boardCanvas = document.createElement('canvas');
+boardCanvas.width = BOARD_WIDTH * PIECE_SIZE;
+boardCanvas.height = BOARD_HEIGHT * PIECE_SIZE;
+var boardCanvas2 = document.createElement('canvas');
+boardCanvas2.width = BOARD_WIDTH * PIECE_SIZE;
+boardCanvas2.height = BOARD_HEIGHT * PIECE_SIZE;
 // UI constants.
 var UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
 var UI_TITLE_FADE_RATE = .025;
@@ -83,16 +106,23 @@ var UI_QUAKE_METER_Y = canvas.height * .55;
 var UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
 var UI_QUAKE_METER_ATTRACT_X = UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2;
 var UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
-var UI_QUAKE_METER_SHAKE = UI_QUAKE_METER_HEIGHT / 10;
+var UI_QUAKE_METER_SHAKE = UI_QUAKE_METER_HEIGHT / 5;
+var UI_QUAKE_METER_PRESHAKE = UI_QUAKE_METER_SHAKE / 2;
+var UI_QUAKE_METER_PRESHAKE_THRESHOLD = .8;
 var UI_QUAKE_TEXT_X = canvas.width - BOARD_PADDING;
 var UI_QUAKE_TEXT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT * .75;
 // Text constants.
-var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks. CLICK and DRAG to select them.",
-						 "Drag a length-" + COLORS.length + " line through exactly ONE BLOCK of EACH COLOR.",
-						 "Release the mouse button and they will VANISH.",
-						 "Try to last AS LONG AS YOU CAN.",
+var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks.",
+						 "Draw a line through a block of each color.",
+						 "The line can't be longer than " + COLORS.length + " blocks.",
+						 "Try to last as long as you can!",
 						 "",
 						 "Click to begin."];
+var CREDITS = ["Quintacolor v 0.9.0",
+			   "best played in Chrome",
+			   "made by Tom Quinn (thquinn.github.io)",
+			   "fonts by Apostrophic Labs (Gilgongo) and Paul D. Hunt (Source Sans Pro)",
+			   "thanks to Arthee, Chet, Jonny, San, and Tanoy!"];
 // Background appearance.
 var BACKGROUND_COLOR = "#C3DCF0";
 var BACKGROUND_TILT = Math.PI * .05;
@@ -113,11 +143,13 @@ var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
 var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
 var EFFECTS_SPARKLE_FADE_SPEED = .01;
 var EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS = PIECE_SIZE * 4;
-var EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 4;
+var EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 3;
 var EFFECTS_QUAKE_FADE_SPEED = .02;
 // 2D HTML5 context setup.
 var ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
+var boardCtx = boardCanvas.getContext('2d');
+var boardCtx2 = boardCanvas2.getContext('2d');
 // Asset setup.
 var ASSET_IMAGE_LOGO = document.createElement("img");
 ASSET_IMAGE_LOGO.src = "https://thquinn.github.io/resources/images/quintacolor/logo.png";
@@ -259,20 +291,62 @@ class Piece {
 	}
 	draw() {
 		var trueY = this.y - this.fallDistance;
-		// Stroke.
-		ctx.fillStyle = STROKE_COLORS[this.color];
-		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + screenShakeX, trueY * PIECE_SIZE + screenShakeY, PIECE_SIZE, PIECE_SIZE);
+		if (BOARD_3D) {
+			var thisPerspective = perspective(this.x, trueY);
+			var abovePerspective = perspective(this.x, trueY - 1);
+			var outer = 0;
+			if (this.x < (BOARD_WIDTH - 1) / 2) {
+				outer = -1;
+			} else if (this.x > (BOARD_WIDTH - 1) / 2) {
+				outer = 1;
+			}
+			var outerPerspective = perspective(this.x + outer, trueY);
+			var sideOffset = thisPerspective[0] > 0 ? 1 : 0;
+			// Draw side face.
+			if (thisPerspective[0] != 0) {
+				boardCtx.fillStyle = SIDE_COLORS[this.color];
+				boardCtx.beginPath();
+				boardCtx.moveTo((this.x + sideOffset) * PIECE_SIZE, trueY * PIECE_SIZE);
+				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + abovePerspective[1]) * PIECE_SIZE);
+				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + 1 + thisPerspective[1]) * PIECE_SIZE);
+				boardCtx.lineTo((this.x + sideOffset) * PIECE_SIZE, (trueY + 1) * PIECE_SIZE);
+				boardCtx.closePath();
+				boardCtx.fill();
+			}
+			// Draw bottom face.
+			if (thisPerspective[1] != 0) {
+				var rightXPerspective, leftXPerspective;
+				if (outer == 0) {
+					rightXPerspective = perspective(this.x + 1, trueY)[0];
+					leftXPerspective = perspective(this.x - 1, trueY)[0];
+				} else {
+					rightXPerspective = outer < 0 ? thisPerspective[0] : outerPerspective[0];
+					leftXPerspective = outer < 0 ? outerPerspective[0] : thisPerspective[0];
+				}
+				boardCtx.fillStyle = BOTTOM_COLORS[this.color];
+				boardCtx.beginPath();
+				boardCtx.moveTo(this.x * PIECE_SIZE, (trueY + 1) * PIECE_SIZE);
+				boardCtx.lineTo((this.x + 1) * PIECE_SIZE, (trueY + 1) * PIECE_SIZE);
+				boardCtx.lineTo((this.x + 1 + rightXPerspective) * PIECE_SIZE, (trueY + 1 + thisPerspective[1]) * PIECE_SIZE);
+				boardCtx.lineTo((this.x + leftXPerspective) * PIECE_SIZE, (trueY + 1 + thisPerspective[1]) * PIECE_SIZE);
+				boardCtx.closePath();
+				boardCtx.fill();
+			}
+		}
+		// Draw front face.
+		boardCtx.fillStyle = FRONT_COLORS[this.color];
+		boardCtx.fillRect(this.x * PIECE_SIZE, trueY * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
 		// Horizontal fill.
-		ctx.fillStyle = COLORS[this.color];
-		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]) + screenShakeX, trueY * PIECE_SIZE + STROKE_WIDTH + screenShakeY, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
+		boardCtx.fillStyle = COLORS[this.color];
+		boardCtx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]), trueY * PIECE_SIZE + STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
 		// Vertical fill.
-		ctx.fillStyle = COLORS[this.color];
-		ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + STROKE_WIDTH + screenShakeX, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]) + screenShakeY, PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
+		boardCtx.fillStyle = COLORS[this.color];
+		boardCtx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]), PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
 		// Selection overlay.
 		for (let s of selected) {
 			if (board[s[0]][s[1]].root == this.root) {
-				ctx.fillStyle = "rgba(255, 255, 255, " + SELECTION_OPACITY + ")";
-				ctx.fillRect(BOARD_PADDING + this.x * PIECE_SIZE + screenShakeX, (this.y - this.fallDistance) * PIECE_SIZE + screenShakeY, PIECE_SIZE, PIECE_SIZE);
+				boardCtx.fillStyle = "rgba(255, 255, 255, " + SELECTION_OPACITY + ")";
+				boardCtx.fillRect(this.x * PIECE_SIZE, (this.y - this.fallDistance) * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
 				break;
 			}
 		}
@@ -478,6 +552,7 @@ function loop() {
 	window.requestAnimationFrame(loop);
 	background.update();
 	background.draw();
+	boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
 
 	// Setup.
 	if (state == StateEnum.SETUP) {
@@ -589,28 +664,29 @@ function loop() {
 	}
 	// Draw pieces.
 	for (var x = 0; x < BOARD_WIDTH; x++) {
-		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
-			if (board[x][y] == null) {
+		var pingpongX = x % 2 == 0 ? x / 2 : BOARD_WIDTH - (x + 1) / 2;
+		for (var y = 0; y < BOARD_HEIGHT; y++) {
+			if (board[pingpongX][y] == null) {
 				continue;
 			}
-			board[x][y].draw();
+			board[pingpongX][y].draw();
 		}
 	}
+	boardCtx2.clearRect(0, 0, boardCanvas2.width, boardCanvas2.height);
+	boardCtx2.drawImage(boardCanvas, 0, 0);
 	// Draw desaturation overlay.
 	if (state == StateEnum.GAME_OVER) {
 		var alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
-		ctx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
-		ctx.globalCompositeOperation = 'saturation';
-		for (var x = 0; x < BOARD_WIDTH; x++) {
-			for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
-				if (board[x][y] == null) {
-					continue;
-				}
-				ctx.fillRect(BOARD_PADDING + x * PIECE_SIZE + screenShakeX, (y - board[x][y].fallDistance) * PIECE_SIZE + screenShakeY, PIECE_SIZE, PIECE_SIZE);
-			}
-		}
-		ctx.globalCompositeOperation = 'source-over';
+		boardCtx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
+		boardCtx.globalCompositeOperation = 'saturation';
+		boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+		boardCtx.globalCompositeOperation = 'source-over';
 	}
+	boardCtx2.globalCompositeOperation = 'source-in';
+	boardCtx2.drawImage(boardCanvas, 0, 0);
+	boardCtx2.globalCompositeOperation = 'source-over';
+	// Draw board.
+	ctx.drawImage(boardCanvas2, BOARD_PADDING + screenShakeX, screenShakeY);
 	// Draw base.
 	var baseY = BOARD_HEIGHT * PIECE_SIZE;
 	ctx.fillStyle = BASE_COLOR;
@@ -685,6 +761,10 @@ function loop() {
 			var quakeWidth = ctx.measureText("uake ready!").width;
 			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
 			ctx.fillText("Q", UI_QUAKE_TEXT_X - quakeWidth + offsetX, UI_QUAKE_TEXT_Y + offsetY);
+		} else if (quakeMeterAppearance >= quakeMeterSize * UI_QUAKE_METER_PRESHAKE_THRESHOLD) {
+			var scale = 1 - (quakeMeterSize - quakeMeterAppearance) / (quakeMeterSize * (1 - UI_QUAKE_METER_PRESHAKE_THRESHOLD));
+			offsetX = Math.randFloat(-1, 1) * UI_QUAKE_METER_PRESHAKE * scale;
+			offsetY = Math.randFloat(-1, 1) * UI_QUAKE_METER_PRESHAKE * scale;
 		}
 		var quakeMeterFillPercent = quakeMeterAppearance / quakeMeterSize;
 		ctx.fillRect(UI_QUAKE_METER_X + UI_QUAKE_METER_STROKE / 2 + offsetX, UI_QUAKE_METER_Y + offsetY, (UI_QUAKE_METER_WIDTH - UI_QUAKE_METER_STROKE) * quakeMeterFillPercent, UI_QUAKE_METER_HEIGHT);
@@ -730,7 +810,7 @@ function loop() {
 		if (state != StateEnum.TITLE) {
 			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
 		}
-		var logoX = canvas.width / 2 - ASSET_IMAGE_LOGO.width / 2;
+		var logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2;
 		ctx.globalAlpha = titleFade;
 		ctx.drawImage(ASSET_IMAGE_LOGO, logoX, canvas.height / 5, UI_TITLE_LOGO_SIZE, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width);
 		ctx.globalAlpha = 1;
@@ -740,6 +820,14 @@ function loop() {
 		ctx.font = "200 " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
 		for (var i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
 			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
+		}
+		ctx.textAlign ='right';
+		ctx.textBaseline = 'alphabetic';
+		ctx.fillStyle = "rgba(128, 128, 128, " + titleFade + ")";
+		ctx.font = (UI_SCORE_FONT_SIZE / 6) + "px Source Sans Pro";
+		for (var i = 0; i < CREDITS.length; i++) {
+			var creditY = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (CREDITS.length - i - 1);
+			ctx.fillText(CREDITS[i], canvas.width - BOARD_PADDING / 2, creditY);
 		}
 	}
 
@@ -951,6 +1039,24 @@ function fallCheck() {
 	}
 }
 
+function perspective(x, y) {
+	var width;
+	if (BOARD_WIDTH % 2 == 0) {
+		var center = BOARD_WIDTH / 2 - .5;
+		var dist = Math.abs(x - center) - .5;
+		if (x > center) {
+			dist *= -1;
+		}
+		width = dist / (center - .5) * PERSPECTIVE_MAX_WIDTH;
+	} else {
+		var halfWidth = Math.floor(BOARD_WIDTH / 2);
+		width = (halfWidth - x) / halfWidth * PERSPECTIVE_MAX_WIDTH;
+	}
+	var heightFactor = (BOARD_HEIGHT - y - 1) / BOARD_HEIGHT;
+	var height = Math.lerp(PERSPECTIVE_MIN_HEIGHT, PERSPECTIVE_MAX_HEIGHT, heightFactor);
+	return [width, height];
+}
+
 // n-to-bounty:
 //	3		4		5		6		7		8		...
 //	1000	3000	6000	10000	15000	21000	...
@@ -1026,4 +1132,4 @@ function quake() {
 }
 
 start();
-loop(); 
+loop();
