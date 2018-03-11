@@ -51,9 +51,9 @@ Array.equal = function (a, b) {
 }
 Array.containsArray = function (a, b) {
   for (var i = 0; i < a.length; ++i) {
-      if (Array.equal(a[i], b)) return true;
+      if (Array.equal(a[i], b)) return i;
   }
-  return false;
+  return -1;
 }
 
 function mousePos(el, e) {

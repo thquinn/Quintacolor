@@ -1,161 +1,183 @@
-// TODO: Fix seams between faces -- make the sides a little taller and the bottoms a little wider.
-// TODO: Improve the vanishes for the new 3D look. A buncha triangles?
+// TODO: Music
+// TODO: Final polish!
+//		Reskin quake, incorporate the meter into the base.
+//			Darken the background while it's happening.
+//			Sound effect.
+//		Spice up the base a little.
+//		Redo the background, incorporate the board perspective.
+// 		Improve the vanishes for the new 3D look. A buncha triangles?
+//		Better on-screen buttons. Click the level indicator to level up.
+//		Better sparkles.
+//		Better sound effects.
+//			Redo the mixing, probably vary pitch instead of speed.
+//		Do another pass on colors.
+// TODO: One more pass on the quake mechanic
 // TODO: Space to quake, move level increase somewhere else.
-// TODO: Click the level indicator to level up.
-// TODO: Better on-screen buttons.
-// TODO: Another pass on quake effects and the quake meter.
 // TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
-// TODO: Better sparkles.
-// TODO: Do another pass on colors.
-// TODO: Sound? A Meteos-style track that has various intensity levels?
-// TODO: More fun score effects.
 // TODO: Fix mouse coordinates on scaled canvas in Firefox.
 // TODO: Drawing optimizations
-//		Only drawing a single center square if there are no connections or connections only in one direction
-//		Skipping the side and/or bottom face draw if there's a block there
 //		Try to rid of the second board canvas which seems necessary because the saturation blend mode is changing the alpha channel.
+// TODO: Programmatic front, side, and bottom colors derived from COLORS
+// TODO: Music/sfx mute buttons
 // TODO: Quinticolor? Quintachrome? Quintichrome? Quintic? Just... Quinta? That's apparently the name of a board game. Would be nice if it were a Q and exactly five letters. Quinth? Quinnt?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Google Analytics on the page.
 
 // KNOWN BUG: Text alignment is messed up in Firefox. Could maybe be fixed by using different baselines.
 
-// MECHANIC: A garbage block that only clears when you quake?
-// MECHANIC: A sixth block color. Maybe you still only need 5 colors on a path.
-// MECHANIC: Wildcards? Rocks?
-// MECHANIC: Upgrades? Diagonal connections, longer paths, occasional piece removal, occasional polyomino removal occasional polyomino breakup, paths through long polyominos, free pathing through empty space?
-// MECHANIC: Make one of the colors different in some way?
+// sfx:
+//		https://freesound.org/people/SuGu14/packs/5082
+//		https://freesound.org/people/sandyrb/sounds/148072/
 
-var StateEnum = {
+const StateEnum = {
 	TITLE: -2,
 	SETUP: -1,
 	RUNNING: 0,
 	PAUSED: 1,
 	GAME_OVER: 2,
 };
-var KeyBindings = {
+const KeyBindings = {
 	INCREASE_LEVEL: 32,
 	PAUSE: 80,
 	QUAKE: 81,
 }
 
 // Gameplay constants.
-var COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
-var BOARD_WIDTH = 15;
-var BOARD_HEIGHT = 12;
-var SETUP_ROWS = 6;
-var COLUMN_SELECTION_WEIGHT_EXPONENT = 4;
-var COLOR_SELECTION_WEIGHT_MIN = 10;
-var COLOR_SELECTION_WEIGHT_EXPONENT = 2;
-var GRAVITY = .005;
-var INITIAL_FALL_VELOCITY = .1;
-var LEVEL_RATE = 40 * 60; // 40 seconds
-var SPAWN_RATE_INITIAL = .75; // pieces spawned per second
-var SPAWN_RATE_INCREMENT = .1;
-var MULTIPLIER_INCREMENT = .05;
-var MULTIPLIER_FORCE_INCREMENT = .12;
-var LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
-var CONNECTION_RATE = .015;
-var BOUNTY_POLYOMINOS = false;
-var QUAKE_METER = true;
-var QUAKE_METER_SIZE_INITIAL = 100;
-var QUAKE_METER_SIZE_INCREMENT = 25;
+const COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
+const BOARD_WIDTH = 15;
+const BOARD_HEIGHT = 12;
+const SETUP_ROWS = 6;
+const COLUMN_SELECTION_WEIGHT_EXPONENT = 4;
+const COLOR_SELECTION_WEIGHT_MIN = 10;
+const COLOR_SELECTION_WEIGHT_EXPONENT = 2;
+const GRAVITY = .005;
+const INITIAL_FALL_VELOCITY = .1;
+const LEVEL_RATE = 40 * 60; // 40 seconds
+const SPAWN_RATE_INITIAL = .75; // pieces spawned per second
+const SPAWN_RATE_INCREMENT = .1;
+const MULTIPLIER_INCREMENT = .05;
+const MULTIPLIER_FORCE_INCREMENT = .12;
+const LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
+const CONNECTION_RATE = .015;
+const BOUNTY_POLYOMINOS = false;
+const QUAKE_METER = true;
+const QUAKE_METER_SIZE_INITIAL = 75;
+const QUAKE_METER_SIZE_INCREMENT = 25;
+const COMBO_DELAY = 3 * 60; // 3 seconds
+const COMBO_POINTS = 200;
 // Board appearance constants.
-var PIECE_SIZE = 60;
-var FRONT_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
-var SIDE_COLORS = ['#E50000', '#1EA0E5', '#D6BA00', '#00B80F', '#7339E5'];
-var BOTTOM_COLORS = ['#CC0000', '#1B8ECC', '#BDA400', '#009E0D', '#6633CC'];
-var BASE_COLOR = '#707090';
-var STROKE_WIDTH = PIECE_SIZE / 6;
-var BOARD_PADDING = PIECE_SIZE;
-var CONNECTION_APPEARANCE_RATE = .2;
-var SETUP_SPAWN_RATE = 1; // frames per piece
-var POST_SETUP_PAUSE = 45;
-var SELECTION_OPACITY = .4;
-var SELECTION_END_RADIUS = PIECE_SIZE / 6;
-var SELECTION_INVALID_COLOR = '#FFC8C8';
-var BOARD_GAME_OVER_DESATURATION = .95;
-var UI_WIDTH = PIECE_SIZE * 8;
-var BOARD_3D = true;
-var PERSPECTIVE_MAX_WIDTH = .5;
-var PERSPECTIVE_MIN_HEIGHT = 0;
-var PERSPECTIVE_MAX_HEIGHT = .33;
+const PIECE_SIZE = 60;
+const FRONT_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
+const SIDE_COLORS = ['#E50000', '#1EA0E5', '#D6BA00', '#00B80F', '#7339E5'];
+const BOTTOM_COLORS = ['#CC0000', '#1B8ECC', '#BDA400', '#009E0D', '#6633CC'];
+const BASE_COLOR = '#707090';
+const STROKE_WIDTH = PIECE_SIZE / 6;
+const BOARD_PADDING = PIECE_SIZE;
+const CONNECTION_APPEARANCE_RATE = .2;
+const SETUP_SPAWN_RATE = 1; // frames per piece
+const POST_SETUP_PAUSE = 45;
+const SELECTION_OPACITY = .4;
+const SELECTION_END_RADIUS = PIECE_SIZE / 6;
+const SELECTION_INVALID_COLOR = '#FFD0D0';
+const BOARD_GAME_OVER_DESATURATION = .95;
+const UI_WIDTH = PIECE_SIZE * 8;
+const BOARD_3D = true;
+const PERSPECTIVE_MAX_WIDTH = .4;
+const PERSPECTIVE_MIN_HEIGHT = 0;
+const PERSPECTIVE_MAX_HEIGHT = .33;
 // Canvas setup.
-var canvas = document.getElementById('canvas');
+const canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
-var boardCanvas = document.createElement('canvas');
+const boardCanvas = document.createElement('canvas');
 boardCanvas.width = BOARD_WIDTH * PIECE_SIZE;
 boardCanvas.height = BOARD_HEIGHT * PIECE_SIZE;
-var boardCanvas2 = document.createElement('canvas');
+const boardCanvas2 = document.createElement('canvas');
 boardCanvas2.width = BOARD_WIDTH * PIECE_SIZE;
 boardCanvas2.height = BOARD_HEIGHT * PIECE_SIZE;
 // UI constants.
-var UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
-var UI_TITLE_FADE_RATE = .025;
-var UI_SCORE_DIGITS = 10;
-var UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
-var UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
-var UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
-var UI_POLYOMINO_BLOCK_FILL = .8;
-var UI_GAME_OVER_FADE_TIME = 60;
-var UI_QUAKE_METER_WIDTH = PIECE_SIZE * 6;
-var UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 6;
-var UI_QUAKE_METER_X = canvas.width - BOARD_PADDING - UI_QUAKE_METER_WIDTH;
-var UI_QUAKE_METER_Y = canvas.height * .55;
-var UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
-var UI_QUAKE_METER_ATTRACT_X = UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2;
-var UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
-var UI_QUAKE_METER_SHAKE = UI_QUAKE_METER_HEIGHT / 5;
-var UI_QUAKE_METER_PRESHAKE = UI_QUAKE_METER_SHAKE / 2;
-var UI_QUAKE_METER_PRESHAKE_THRESHOLD = .8;
-var UI_QUAKE_TEXT_X = canvas.width - BOARD_PADDING;
-var UI_QUAKE_TEXT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT * .75;
+const UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
+const UI_TITLE_FADE_RATE = .025;
+const UI_SCORE_DIGITS = 10;
+const UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
+const UI_SCORE_POPUP_DRAIN_PERCENT = .04;
+const UI_SCORE_POPUP_DRAIN_MIN = 11;
+const UI_BONUS_TIMER = 3 * 60; // 3 seconds
+const UI_BONUS_FLASH_FRAMES = 3;
+const UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
+const UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
+const UI_POLYOMINO_BLOCK_FILL = .8;
+const UI_GAME_OVER_FADE_TIME = 60;
+const UI_QUAKE_METER_WIDTH = PIECE_SIZE * 6;
+const UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 6;
+const UI_QUAKE_METER_X = canvas.width / 2;
+const UI_QUAKE_METER_Y = canvas.height * .9;
+const UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
+const UI_QUAKE_METER_ATTRACT_X = UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2;
+const UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
+const UI_QUAKE_METER_SHAKE = UI_QUAKE_METER_HEIGHT / 5;
+const UI_QUAKE_METER_PRESHAKE = UI_QUAKE_METER_SHAKE / 2;
+const UI_QUAKE_METER_PRESHAKE_THRESHOLD = .8;
+const UI_QUAKE_TEXT_X = canvas.width / 2;
+const UI_QUAKE_TEXT_Y = canvas.height * .95;
 // Text constants.
-var TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks.",
-						 "Draw a line through a block of each color.",
-						 "The line can't be longer than " + COLORS.length + " blocks.",
-						 "Try to last as long as you can!",
-						 "",
-						 "Click to begin."];
-var CREDITS = ["Quintacolor v 0.9.0",
-			   "best played in Chrome",
-			   "made by Tom Quinn (thquinn.github.io)",
-			   "fonts by Apostrophic Labs (Gilgongo) and Paul D. Hunt (Source Sans Pro)",
-			   "thanks to Arthee, Chet, Jonny, San, and Tanoy!"];
+const TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks.",
+						   "Draw a line through a block of each color.",
+						   "The line can't be longer than " + COLORS.length + " blocks.",
+						   "Survive as long as you can!",
+						   "",
+						   "Click to begin."];
+const CREDITS = ["Quintacolor v 0.9.1",
+			     "a game by Tom Quinn (thquinn.github.io)",
+			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
+			     "sounds by Fabia Arrizabalaga",
+			     "thanks to Arthee, Chet, Jonny, Maggie, San, and Tanoy",
+			     "best played in Chrome"];
 // Background appearance.
-var BACKGROUND_COLOR = "#C3DCF0";
-var BACKGROUND_TILT = Math.PI * .05;
-var BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
-var BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
+const BACKGROUND_COLOR = "#C3DCF0";
+const BACKGROUND_TILT = Math.PI * .05;
+const BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
+const BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
 // Effects appearance.
-var EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
-var EFFECTS_VANISH_INIT_VELOCITY_VARIANCE = EFFECTS_VANISH_INIT_VELOCITY / 5;
-var EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1500;
-var EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .000015;
-var EFFECTS_VANISH_FADE_SPEED = .02;
-var EFFECTS_SPARKLE_COUNT = 4;
-var EFFECTS_SPARKLE_RADIUS = PIECE_SIZE / 16;
-var EFFECTS_SPARKLE_INIT_VELOCITY = PIECE_SIZE / 60;
-var EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE = PIECE_SIZE / 60;
-var EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 800;
-var EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
-var EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
-var EFFECTS_SPARKLE_FADE_SPEED = .01;
-var EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS = PIECE_SIZE * 4;
-var EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 3;
-var EFFECTS_QUAKE_FADE_SPEED = .02;
+const EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
+const EFFECTS_VANISH_INIT_VELOCITY_VARIANCE = EFFECTS_VANISH_INIT_VELOCITY / 5;
+const EFFECTS_VANISH_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 1500;
+const EFFECTS_VANISH_ROTATIONAL_VELOCITY_RANGE = Math.PI * .000015;
+const EFFECTS_VANISH_FADE_SPEED = .02;
+const EFFECTS_SPARKLE_COUNT = 4;
+const EFFECTS_SPARKLE_RADIUS = PIECE_SIZE / 16;
+const EFFECTS_SPARKLE_INIT_VELOCITY = PIECE_SIZE / 60;
+const EFFECTS_SPARKLE_INIT_VELOCITY_VARIANCE = PIECE_SIZE / 60;
+const EFFECTS_SPARKLE_LIFT = PIECE_SIZE / 800;
+const EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
+const EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
+const EFFECTS_SPARKLE_FADE_SPEED = .01;
+const EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS = PIECE_SIZE * 4;
+const EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 3;
+const EFFECTS_QUAKE_FADE_SPEED = .02;
+// Sound constants.
+const SFX_STING_MAX_VOL_PIECES = 12;
+const SFX_STING_RATE_FACTOR = .05;
 // 2D HTML5 context setup.
-var ctx = canvas.getContext('2d');
+const ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
-var boardCtx = boardCanvas.getContext('2d');
-var boardCtx2 = boardCanvas2.getContext('2d');
+const boardCtx = boardCanvas.getContext('2d');
+const boardCtx2 = boardCanvas2.getContext('2d');
 // Asset setup.
-var ASSET_IMAGE_LOGO = document.createElement("img");
+const ASSET_IMAGE_LOGO = document.createElement("img");
 ASSET_IMAGE_LOGO.src = "https://thquinn.github.io/resources/images/quintacolor/logo.png";
+const ASSET_SFX_LAND = new Howl({
+  src: ['https://thquinn.github.io/resources/sfx/quintacolor/land.wav']
+});
+const ASSET_SFX_BREAK = new Howl({
+  src: ['https://thquinn.github.io/resources/sfx/quintacolor/break.wav']
+});
+const ASSET_SFX_STING = new Howl({
+  src: ['https://thquinn.github.io/resources/sfx/quintacolor/sting.wav']
+});
 
 // Initialize all game variables.
-var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, screenShakeX, screenShakeY;
+var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboAppearance, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, screenShakeX, screenShakeY, sfxMap;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
@@ -172,6 +194,13 @@ function start() {
 	selected = [];
 	level = 1;
 	score = 0;
+	scoreAppearance = 0;
+	scorePopup = 0;
+	combo = 0;
+	comboAppearance = 0;
+	comboDelay = 0;
+	bonusText = '';
+	bonusTimer = 0;
 	multiplier = 1;
 	spawnBlocked = false;
 	gameOverClock = 0;
@@ -186,6 +215,7 @@ function start() {
 	quakeScreenShake = 0;
 	screenShakeX = 0;
 	screenShakeY = 0;
+	sfxMap = new Map();
 }
 
 class Piece {
@@ -244,10 +274,11 @@ class Piece {
 				distanceToLowerNeighbor = neighborTop - (this.y - this.fallDistance + 1);
 			}
 			var fall = Math.min(this.dy, this.fallDistance, distanceToLowerNeighbor);
-			if (fall == 0) {
-				this.dy = 0;
-			}
 			this.fallDistance -= fall;
+			if (this.fallDistance == 0) {
+				this.dy = 0;
+				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? .1 : .2);
+			}
 		} else {
 			this.dy = 0;
 		}
@@ -302,19 +333,10 @@ class Piece {
 			}
 			var outerPerspective = perspective(this.x + outer, trueY);
 			var sideOffset = thisPerspective[0] > 0 ? 1 : 0;
-			// Draw side face.
-			if (thisPerspective[0] != 0) {
-				boardCtx.fillStyle = SIDE_COLORS[this.color];
-				boardCtx.beginPath();
-				boardCtx.moveTo((this.x + sideOffset) * PIECE_SIZE, trueY * PIECE_SIZE);
-				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + abovePerspective[1]) * PIECE_SIZE);
-				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + 1 + thisPerspective[1]) * PIECE_SIZE);
-				boardCtx.lineTo((this.x + sideOffset) * PIECE_SIZE, (trueY + 1) * PIECE_SIZE);
-				boardCtx.closePath();
-				boardCtx.fill();
-			}
 			// Draw bottom face.
-			if (thisPerspective[1] != 0) {
+			var bottomObscured = (this.y == BOARD_HEIGHT && this.fallDistance == 0) ||
+								 (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] != null && board[this.x][this.y + 1].fallDistance == this.fallDistance);
+			if (!bottomObscured && thisPerspective[1] != 0) {
 				var rightXPerspective, leftXPerspective;
 				if (outer == 0) {
 					rightXPerspective = perspective(this.x + 1, trueY)[0];
@@ -332,16 +354,39 @@ class Piece {
 				boardCtx.closePath();
 				boardCtx.fill();
 			}
+			// Draw side face.
+			var sideObscured = board[this.x - outer][this.y] != null && board[this.x - outer][this.y].fallDistance == 0 && this.fallDistance == 0;
+			if (!sideObscured && thisPerspective[0] != 0) {
+				var extra = PIECE_SIZE * .01;
+				boardCtx.fillStyle = SIDE_COLORS[this.color];
+				boardCtx.beginPath();
+				boardCtx.moveTo((this.x + sideOffset) * PIECE_SIZE, trueY * PIECE_SIZE);
+				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + abovePerspective[1]) * PIECE_SIZE);
+				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + 1 + thisPerspective[1]) * PIECE_SIZE + extra);
+				boardCtx.lineTo((this.x + sideOffset) * PIECE_SIZE, (trueY + 1) * PIECE_SIZE + extra);
+				boardCtx.closePath();
+				boardCtx.fill();
+			}
 		}
 		// Draw front face.
 		boardCtx.fillStyle = FRONT_COLORS[this.color];
 		boardCtx.fillRect(this.x * PIECE_SIZE, trueY * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
+		// Determine which fills are necessary.
+		var horizFill = this.connection[0] > 0 || this.connection[1] > 0;
+		var vertFill = this.connection[2] > 0 || this.connection[3] > 0;
+		if (!horizFill && !vertFill) {
+			horizFill = true;
+		}
 		// Horizontal fill.
-		boardCtx.fillStyle = COLORS[this.color];
-		boardCtx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]), trueY * PIECE_SIZE + STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
+		if (horizFill) {
+			boardCtx.fillStyle = COLORS[this.color];
+			boardCtx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[0]), trueY * PIECE_SIZE + STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[0] - this.connectionAppearance[1]) * STROKE_WIDTH, PIECE_SIZE - 2 * STROKE_WIDTH);
+		}
 		// Vertical fill.
-		boardCtx.fillStyle = COLORS[this.color];
-		boardCtx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]), PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
+		if (vertFill) {
+			boardCtx.fillStyle = COLORS[this.color];
+			boardCtx.fillRect(this.x * PIECE_SIZE + STROKE_WIDTH, trueY * PIECE_SIZE + STROKE_WIDTH * (1 - this.connectionAppearance[2]), PIECE_SIZE - 2 * STROKE_WIDTH, PIECE_SIZE - (2 - this.connectionAppearance[2] - this.connectionAppearance[3])  * STROKE_WIDTH);
+		}
 		// Selection overlay.
 		for (let s of selected) {
 			if (board[s[0]][s[1]].root == this.root) {
@@ -352,7 +397,6 @@ class Piece {
 		}
 	}
 	destroy() {
-		score = Math.round(score + this.root.children.size * 100 * multiplier);
 		if (BOUNTY_POLYOMINOS && polyomino.isThis(this.root)) {
 			nextPolyomino();
 		}
@@ -624,6 +668,17 @@ function loop() {
 		}
 	}
 	// Update everything else.
+	bonusTimer = Math.max(0, bonusTimer - 1);
+	comboDelay = Math.max(0, comboDelay - 1);
+	if (comboDelay == 0) {
+		combo = 0;
+		if (scorePopup > 0) {
+			var drainAmount = Math.max(Math.round(scorePopup * UI_SCORE_POPUP_DRAIN_PERCENT), UI_SCORE_POPUP_DRAIN_MIN);
+			drainAmount = Math.min(scorePopup, drainAmount);
+			scorePopup -= drainAmount;
+			scoreAppearance += drainAmount;
+		}
+	}
 	if (state == StateEnum.RUNNING) {
 		// Level up.
 		if (levelUpForceCooldown > 0) {
@@ -725,11 +780,20 @@ function loop() {
 	ctx.textBaseline = 'middle';
 	ctx.fillStyle = "#FFFFFF";
 	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
-	ctx.fillText(score, canvas.width - BOARD_PADDING, canvas.height / 2);
-	var leadingZeroes = Math.max(0, UI_SCORE_DIGITS - score.toString().length);
-	var scoreWidth = ctx.measureText(score).width;
+	ctx.fillText(scoreAppearance, canvas.width - BOARD_PADDING, canvas.height / 2);
+	var leadingZeroes = Math.max(0, UI_SCORE_DIGITS - scoreAppearance.toString().length);
+	var scoreWidth = ctx.measureText(scoreAppearance).width;
 	ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
+	if (scorePopup > 0) {
+		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+		ctx.fillText("+" + scorePopup, canvas.width - BOARD_PADDING, canvas.height * .565);
+	}
+	if (bonusTimer > 0) {
+		ctx.fillStyle = (clock % (UI_BONUS_FLASH_FRAMES * 2)) < UI_BONUS_FLASH_FRAMES ? "#FFFFFF": "#F0F0FF";
+		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
+		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .59375);	
+	}
 	var levelPercent = levelTimer / LEVEL_RATE;
 	var levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
 	ctx.beginPath();
@@ -838,8 +902,15 @@ function loop() {
 		gameOverClock++;
 	}
 
+	// Play audio.
+	for (let key of sfxMap.keys()) {
+		key.volume(sfxMap.get(key));
+		key.play();
+	}
+
 	// Update key states.
 	keysPressed.clear();
+	sfxMap.clear();
 }
 
 canvas.addEventListener('mousedown', function(e) {
@@ -916,9 +987,21 @@ function mouseUpHelper() {
 	}
 	if (colorCheck.size == 0) {
 		var toDestroy = new Set();
+		var piecesDestroyed = 0;
 		for (var i = 0; i < selected.length; i++) {
 			toDestroy.add(board[selected[i][0]][selected[i][1]].root);
+			piecesDestroyed += board[selected[i][0]][selected[i][1]].root.children.size;
 		}
+		scorePoints(Math.round(piecesDestroyed * 100 * multiplier));
+		// Play sound effects.
+		playSFX(ASSET_SFX_BREAK, .2);
+		var stingStrength = (piecesDestroyed - COLORS.length) / SFX_STING_MAX_VOL_PIECES;
+		if (piecesDestroyed > SFX_STING_MAX_VOL_PIECES) {
+			ASSET_SFX_STING.rate(1 + .1 * (piecesDestroyed - SFX_STING_MAX_VOL_PIECES));
+		} else {
+			ASSET_SFX_STING.rate(1);
+		}
+		playSFX(ASSET_SFX_STING, Math.min(1, stingStrength));
 		for (let item of toDestroy) {
 			item.destroy();
 		}
@@ -965,8 +1048,10 @@ function selectCheckHelper(x, y) {
 		return;
 	}
 	var coor = [x, y];
-	if (selected.length > 1 && Array.equal(selected[selected.length - 2], coor)) {
-		selected.splice(selected.length - 1, 1);
+	var i = Array.containsArray(selected, coor);
+	if (i != -1) {
+		selected.splice(i + 1);
+		return;
 	}
 	if (selected.length == COLORS.length) {
 		return;
@@ -977,9 +1062,6 @@ function selectCheckHelper(x, y) {
 		if (d != 1) {
 			return;
 		}
-	}
-	if (Array.containsArray(selected, coor)) {
-		return;
 	}
 	selected.push([x, y]);
 }
@@ -1039,6 +1121,27 @@ function fallCheck() {
 	}
 }
 
+function scorePoints(points, increaseCombo = true) {
+	if (increaseCombo && combo >= 1) {
+		var comboPoints = Math.round(200 * combo * multiplier);
+		points += comboPoints;
+		bonusText = (combo + 1) + "X COMBO +" + comboPoints;
+		bonusTimer = UI_BONUS_TIMER;
+	}
+	score += points;
+	if (scorePopup > 0 && comboDelay == 0) {
+		scoreAppearance += scorePopup;
+		scorePopup = points;
+	} else {
+		if (increaseCombo && combo == 0 || comboDelay > 0) {
+			combo++;
+			comboAppearance = combo;
+		}
+		scorePopup += points;
+	}
+	comboDelay = COMBO_DELAY;
+}
+
 function perspective(x, y) {
 	var width;
 	if (BOARD_WIDTH % 2 == 0) {
@@ -1055,6 +1158,14 @@ function perspective(x, y) {
 	var heightFactor = (BOARD_HEIGHT - y - 1) / BOARD_HEIGHT;
 	var height = Math.lerp(PERSPECTIVE_MIN_HEIGHT, PERSPECTIVE_MAX_HEIGHT, heightFactor);
 	return [width, height];
+}
+
+function playSFX(sfx, volume) {
+	if (!sfxMap.has(sfx)) {
+		sfxMap.set(sfx, volume);
+	} else {
+		sfxMap.set(sfx, Math.max(sfxMap.get(sfx), volume));
+	}
 }
 
 // n-to-bounty:
@@ -1075,7 +1186,7 @@ function nextPolyomino() {
 		polyominosScored = 0;
 		return;
 	}
-	score += polyominoBounty * multiplier;
+	scorePoints(polyominoBounty * multiplier);
 	polyominosScored++;
 	var n = Math.floor((Math.sqrt(score - 1 + 2500) + 350) / 100); // thanks wolfram alpha
 	var oldPolyomino = polyomino;
