@@ -9,16 +9,20 @@
 //		Better on-screen buttons. Click the level indicator to level up.
 //		Better sparkles.
 //		Better sound effects.
-//			Redo the mixing, probably vary pitch instead of speed.
+//			Redo the mixing for multiple plays, align playback rate changes to the chromatic scale.
 //		Do another pass on colors.
 // TODO: One more pass on the quake mechanic
 // TODO: Space to quake, move level increase somewhere else.
-// TODO: Look into a difficulty falloff: i.e. sublinear spawn rate increases.
 // TODO: Fix mouse coordinates on scaled canvas in Firefox.
 // TODO: Drawing optimizations
 //		Try to rid of the second board canvas which seems necessary because the saturation blend mode is changing the alpha channel.
+// TODO: Combine SFX into a single wav, use Howler's "audio sprites"
 // TODO: Programmatic front, side, and bottom colors derived from COLORS
+// TODO: Move logic from mouse events to the main thread
 // TODO: Music/sfx mute buttons
+// TODO: Fix connections still breaking while falling in parallel.
+// TODO: Show an example path if X seconds pass without the player getting points?
+// TODO: Add sound credits
 // TODO: Quinticolor? Quintachrome? Quintichrome? Quintic? Just... Quinta? That's apparently the name of a board game. Would be nice if it were a Q and exactly five letters. Quinth? Quinnt?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Google Analytics on the page.
@@ -26,8 +30,8 @@
 // KNOWN BUG: Text alignment is messed up in Firefox. Could maybe be fixed by using different baselines.
 
 // sfx:
-//		https://freesound.org/people/SuGu14/packs/5082
-//		https://freesound.org/people/sandyrb/sounds/148072/
+//		land: https://freesound.org/people/SuGu14/packs/5082
+//		break: https://freesound.org/people/sandyrb/sounds/148072/
 
 const StateEnum = {
 	TITLE: -2,
@@ -47,6 +51,7 @@ const COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 const BOARD_WIDTH = 15;
 const BOARD_HEIGHT = 12;
 const SETUP_ROWS = 6;
+const SETUP_NO_CONNECTIONS = true;
 const COLUMN_SELECTION_WEIGHT_EXPONENT = 4;
 const COLOR_SELECTION_WEIGHT_MIN = 10;
 const COLOR_SELECTION_WEIGHT_EXPONENT = 2;
@@ -55,6 +60,7 @@ const INITIAL_FALL_VELOCITY = .1;
 const LEVEL_RATE = 40 * 60; // 40 seconds
 const SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 const SPAWN_RATE_INCREMENT = .1;
+const SPAWN_RATE_INCREMENT_EXPONENT = .9;
 const MULTIPLIER_INCREMENT = .05;
 const MULTIPLIER_FORCE_INCREMENT = .12;
 const LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
@@ -110,7 +116,7 @@ const UI_POLYOMINO_BLOCK_FILL = .8;
 const UI_GAME_OVER_FADE_TIME = 60;
 const UI_QUAKE_METER_WIDTH = PIECE_SIZE * 6;
 const UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 6;
-const UI_QUAKE_METER_X = canvas.width / 2;
+const UI_QUAKE_METER_X = canvas.width / 3;
 const UI_QUAKE_METER_Y = canvas.height * .9;
 const UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
 const UI_QUAKE_METER_ATTRACT_X = UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2;
@@ -130,13 +136,12 @@ const TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks.",
 const CREDITS = ["Quintacolor v 0.9.1",
 			     "a game by Tom Quinn (thquinn.github.io)",
 			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
-			     "sounds by Fabia Arrizabalaga",
-			     "thanks to Arthee, Chet, Jonny, Maggie, San, and Tanoy",
+			     "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
 			     "best played in Chrome"];
 // Background appearance.
 const BACKGROUND_COLOR = "#C3DCF0";
 const BACKGROUND_TILT = Math.PI * .05;
-const BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0125)";
+const BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0166)";
 const BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
 // Effects appearance.
 const EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
@@ -158,6 +163,7 @@ const EFFECTS_QUAKE_FADE_SPEED = .02;
 // Sound constants.
 const SFX_STING_MAX_VOL_PIECES = 12;
 const SFX_STING_RATE_FACTOR = .05;
+const SFX_SCORE_REPETITION = 3;
 // 2D HTML5 context setup.
 const ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
@@ -165,25 +171,28 @@ const boardCtx = boardCanvas.getContext('2d');
 const boardCtx2 = boardCanvas2.getContext('2d');
 // Asset setup.
 const ASSET_IMAGE_LOGO = document.createElement("img");
-ASSET_IMAGE_LOGO.src = "https://thquinn.github.io/resources/images/quintacolor/logo.png";
+ASSET_IMAGE_LOGO.src = "img/logo.png";
 const ASSET_SFX_LAND = new Howl({
-  src: ['https://thquinn.github.io/resources/sfx/quintacolor/land.wav']
+  src: ['sfx/land.wav']
 });
 const ASSET_SFX_BREAK = new Howl({
-  src: ['https://thquinn.github.io/resources/sfx/quintacolor/break.wav']
+  src: ['sfx/break.wav']
 });
 const ASSET_SFX_STING = new Howl({
-  src: ['https://thquinn.github.io/resources/sfx/quintacolor/sting.wav']
+  src: ['sfx/sting.wav']
+});
+const ASSET_SFX_SCORE = new Howl({
+  src: ['sfx/score.wav']
 });
 
 // Initialize all game variables.
-var clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboAppearance, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, screenShakeX, screenShakeY, sfxMap;
+let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboAppearance, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, sfxMap;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
 	titleFade = 1.0;
 	board = new Array(BOARD_WIDTH);
-	for (var i = 0; i < BOARD_WIDTH; i++) {
+	for (let i = 0; i < BOARD_WIDTH; i++) {
 		board[i] = new Array(BOARD_HEIGHT);
 	}
 	keysPressed = new Set();
@@ -213,20 +222,18 @@ function start() {
 	quakeMeter = 0;
 	quakeMeterAppearance = 0;
 	quakeScreenShake = 0;
-	screenShakeX = 0;
-	screenShakeY = 0;
 	sfxMap = new Map();
 }
 
 class Piece {
-	constructor(col) {
+	constructor(col, forceNoConnections = false) {
 		if (spawnBlocked) {
 			return;
 		}
 		// Select column.
 		if (col == null) {
-			var xWeights = new Array(BOARD_WIDTH).fill(0);
-			for (var x = 0; x < BOARD_WIDTH; x++) {
+			let xWeights = new Array(BOARD_WIDTH).fill(0);
+			for (let x = 0; x < BOARD_WIDTH; x++) {
 				for (; xWeights[x] < BOARD_HEIGHT; xWeights[x]++) {
 					if (board[x][xWeights[x]] != null) {
 						break;
@@ -243,18 +250,33 @@ class Piece {
 			this.y++;
 		}
 		// Select color.
-		var colorWeights = new Array(COLORS.length).fill(COLOR_SELECTION_WEIGHT_MIN);
-		for (var x = 0; x < BOARD_WIDTH; x++) {
-			for (var y = 0; y < BOARD_WIDTH; y++) {
+		let colorWeights = new Array(COLORS.length).fill(COLOR_SELECTION_WEIGHT_MIN);
+		for (let x = 0; x < BOARD_WIDTH; x++) {
+			for (let y = 0; y < BOARD_WIDTH; y++) {
 				if (board[x][y] != null) {
 					colorWeights[board[x][y].color]++;
 				}
 			}
 		}
-		for (var i = 0; i < colorWeights.length; i++) {
+		for (let i = 0; i < colorWeights.length; i++) {
 			colorWeights[i] = 1 / Math.pow(colorWeights[i], COLOR_SELECTION_WEIGHT_EXPONENT);
 		}
 		this.color = Math.pickFromWeightArray(colorWeights);
+		if (COLORS.length >= 4 && forceNoConnections) {
+			let neighborColors = new Set();
+			if (this.x > 0 && board[this.x - 1][this.y] != null) {
+				neighborColors.add(board[this.x - 1][this.y].color);
+			}
+			if (this.x < BOARD_WIDTH - 1 && board[this.x + 1][this.y] != null) {
+				neighborColors.add(board[this.x + 1][this.y].color);
+			}
+			if (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] != null) {
+				neighborColors.add(board[this.x][this.y + 1].color);
+			}
+			while (neighborColors.has(this.color)) {
+				this.color = Math.pickFromWeightArray(colorWeights);
+			}
+		}
 		// Initialize.
 		board[this.x][this.y] = this;
 		this.dy = INITIAL_FALL_VELOCITY;
@@ -268,16 +290,17 @@ class Piece {
 	update(setup) {
 		if (this.fallDistance > 0) {
 			this.dy += GRAVITY;
-			var distanceToLowerNeighbor = Number.MAX_SAFE_INTEGER;
+			let distanceToLowerNeighbor = Number.MAX_SAFE_INTEGER;
 			if (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] != null && board[this.x][this.y + 1].fallDistance > 0) {
-				var neighborTop = (board[this.x][this.y + 1].y - board[this.x][this.y + 1].fallDistance);
+				let neighborTop = (board[this.x][this.y + 1].y - board[this.x][this.y + 1].fallDistance);
 				distanceToLowerNeighbor = neighborTop - (this.y - this.fallDistance + 1);
 			}
-			var fall = Math.min(this.dy, this.fallDistance, distanceToLowerNeighbor);
+			let fall = Math.min(this.dy, this.fallDistance, distanceToLowerNeighbor);
 			this.fallDistance -= fall;
 			if (this.fallDistance == 0) {
+				let vol = this.dy * .5;
 				this.dy = 0;
-				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? .1 : .2);
+				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? .066 : vol);
 			}
 		} else {
 			this.dy = 0;
@@ -287,21 +310,20 @@ class Piece {
 		}
 
 		// Update connections and connection appearances.
-		for (var i = 0; i < this.connection.length; i++) {
+		for (let i = 0; i < this.connection.length; i++) {
 			if (this.connection[i] < 1) {
-				var nx = this.x + NEIGHBORS[i][0];
-				var ny = this.y + NEIGHBORS[i][1];
+				let nx = this.x + NEIGHBORS[i][0];
+				let ny = this.y + NEIGHBORS[i][1];
 				if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT || board[nx][ny] == null || board[nx][ny].color != this.color) {
 					this.connection[i] = 0;
 				} else if (this.fallDistance > 0 || board[nx][ny].fallDistance > 0) {
-					// TODO: Fix connections still breaking while falling in parallel.
-					var iReverse = (i / 2) * 2 + ((i + 1) % 2);
+					let iReverse = (i / 2) * 2 + ((i + 1) % 2);
 					this.connection[i] = Math.min(this.connection[i], board[nx][ny].connection[iReverse]);
 				} else {
 					this.connection[i] = Math.min(this.connection[i] + CONNECTION_RATE, 1);
 					if (this.connection[i] == 1) {
 						// Connect!
-						var neighbor = board[nx][ny];
+						let neighbor = board[nx][ny];
 						if (!neighbor.root.children.has(this)) {
 							for (let child of neighbor.root.children) {
 								this.root.children.add(child);
@@ -321,23 +343,23 @@ class Piece {
 		}
 	}
 	draw() {
-		var trueY = this.y - this.fallDistance;
+		let trueY = this.y - this.fallDistance;
 		if (BOARD_3D) {
-			var thisPerspective = perspective(this.x, trueY);
-			var abovePerspective = perspective(this.x, trueY - 1);
-			var outer = 0;
+			let thisPerspective = perspective(this.x, trueY);
+			let abovePerspective = perspective(this.x, trueY - 1);
+			let outer = 0;
 			if (this.x < (BOARD_WIDTH - 1) / 2) {
 				outer = -1;
 			} else if (this.x > (BOARD_WIDTH - 1) / 2) {
 				outer = 1;
 			}
-			var outerPerspective = perspective(this.x + outer, trueY);
-			var sideOffset = thisPerspective[0] > 0 ? 1 : 0;
+			let outerPerspective = perspective(this.x + outer, trueY);
+			let sideOffset = thisPerspective[0] > 0 ? 1 : 0;
 			// Draw bottom face.
-			var bottomObscured = (this.y == BOARD_HEIGHT && this.fallDistance == 0) ||
+			let bottomObscured = (this.y == BOARD_HEIGHT && this.fallDistance == 0) ||
 								 (this.y < BOARD_HEIGHT - 1 && board[this.x][this.y + 1] != null && board[this.x][this.y + 1].fallDistance == this.fallDistance);
 			if (!bottomObscured && thisPerspective[1] != 0) {
-				var rightXPerspective, leftXPerspective;
+				let rightXPerspective, leftXPerspective;
 				if (outer == 0) {
 					rightXPerspective = perspective(this.x + 1, trueY)[0];
 					leftXPerspective = perspective(this.x - 1, trueY)[0];
@@ -355,13 +377,13 @@ class Piece {
 				boardCtx.fill();
 			}
 			// Draw side face.
-			var sideObscured = board[this.x - outer][this.y] != null && board[this.x - outer][this.y].fallDistance == 0 && this.fallDistance == 0;
+			let sideObscured = board[this.x - outer][this.y] != null && board[this.x - outer][this.y].fallDistance == 0 && this.fallDistance == 0;
 			if (!sideObscured && thisPerspective[0] != 0) {
-				var extra = PIECE_SIZE * .01;
+				let extra = PIECE_SIZE * .0066;
 				boardCtx.fillStyle = SIDE_COLORS[this.color];
 				boardCtx.beginPath();
-				boardCtx.moveTo((this.x + sideOffset) * PIECE_SIZE, trueY * PIECE_SIZE);
-				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + abovePerspective[1]) * PIECE_SIZE);
+				boardCtx.moveTo((this.x + sideOffset) * PIECE_SIZE, trueY * PIECE_SIZE - extra);
+				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + abovePerspective[1]) * PIECE_SIZE - extra);
 				boardCtx.lineTo((this.x + sideOffset + thisPerspective[0]) * PIECE_SIZE, (trueY + 1 + thisPerspective[1]) * PIECE_SIZE + extra);
 				boardCtx.lineTo((this.x + sideOffset) * PIECE_SIZE, (trueY + 1) * PIECE_SIZE + extra);
 				boardCtx.closePath();
@@ -372,8 +394,8 @@ class Piece {
 		boardCtx.fillStyle = FRONT_COLORS[this.color];
 		boardCtx.fillRect(this.x * PIECE_SIZE, trueY * PIECE_SIZE, PIECE_SIZE, PIECE_SIZE);
 		// Determine which fills are necessary.
-		var horizFill = this.connection[0] > 0 || this.connection[1] > 0;
-		var vertFill = this.connection[2] > 0 || this.connection[3] > 0;
+		let horizFill = this.connection[0] > 0 || this.connection[1] > 0;
+		let vertFill = this.connection[2] > 0 || this.connection[3] > 0;
 		if (!horizFill && !vertFill) {
 			horizFill = true;
 		}
@@ -400,7 +422,7 @@ class Piece {
 		if (BOUNTY_POLYOMINOS && polyomino.isThis(this.root)) {
 			nextPolyomino();
 		}
-		var quakeMeterFill = 0;
+		let quakeMeterFill = 0;
 		if (QUAKE_METER && this.root.children.size > 1) {
 			quakeMeterFill = this.root.children.size - 1;
 			quakeMeter = Math.min(quakeMeter + quakeMeterFill, quakeMeterSize);
@@ -415,7 +437,7 @@ class Piece {
 class Background {
 	constructor() {
 		this.squiggles = [];
-		for (var i = 0; i < 15; i++) {
+		for (let i = 0; i < 15; i++) {
 			this.squiggles.push(new Squiggle());
 		}
 	}
@@ -447,7 +469,7 @@ class Squiggle {
 	}
 	newTarget() {
 		this.target = this.coor.slice();
-		var delta;
+		let delta;
 		if (this.horiz) {
 			this.target[0] = canvas.width * -.5 + 1.5 * Math.random() * canvas.width;
 			delta = this.target[0] - this.coor[0];
@@ -468,8 +490,8 @@ class Squiggle {
 		}
 	}
 	draw() {
-		var interpVal = this.frames < this.waitFrames ? 0 : (this.frames - this.waitFrames) / (this.moveFrames);
-		var leftRight, topBottom;
+		let interpVal = this.frames < this.waitFrames ? 0 : (this.frames - this.waitFrames) / (this.moveFrames);
+		let leftRight, topBottom;
 		if (this.coor[0] != this.target[0]) {
 			leftRight = this.getDrawCoors(this.coor[0], this.target[0], interpVal);
 			topBottom = [this.coor[1], this.coor[1] + BACKGROUND_SQUIGGLE_SIZE];
@@ -480,14 +502,14 @@ class Squiggle {
 		ctx.fillRect(leftRight[0], topBottom[0], leftRight[1] - leftRight[0], topBottom[1] - topBottom[0]);
 	}
 	getDrawCoors(val, target, interpVal) {
-		var coors = [interpVal <= .5 ? val : Math.easeInOutQuad(interpVal - .5, val, (target - val), .5),
+		let coors = [interpVal <= .5 ? val : Math.easeInOutQuad(interpVal - .5, val, (target - val), .5),
 					 interpVal <= .5 ? Math.easeInOutQuad(interpVal, val, (target - val), .5) : target];
 		coors.sort(function(a, b){return a - b});
 		coors[1] += BACKGROUND_SQUIGGLE_SIZE;
 		return coors;
 	}
 }
-var background = new Background();
+let background = new Background();
 
 class Effects {
 	constructor() {
@@ -497,21 +519,21 @@ class Effects {
 	vanish(x, y, quakeMeterFill) {
 		this.vanishes.push(new Vanish(x, y));
 		if (!QUAKE_METER || quakeMeterFill > 0) {
-			for (var i = 0; i < EFFECTS_SPARKLE_COUNT; i++) {
-				var sx = BOARD_PADDING + x * PIECE_SIZE + Math.random() * PIECE_SIZE;
-				var sy = y * PIECE_SIZE + Math.random() * PIECE_SIZE;
+			for (let i = 0; i < EFFECTS_SPARKLE_COUNT; i++) {
+				let sx = BOARD_PADDING + x * PIECE_SIZE + Math.random() * PIECE_SIZE;
+				let sy = y * PIECE_SIZE + Math.random() * PIECE_SIZE;
 				this.sparkles.push(new Sparkle(sx, sy, quakeMeterFill / EFFECTS_SPARKLE_COUNT));
 			}
 		}
 	}
 	update() {
-		for (var i = this.vanishes.length - 1; i >= 0; i--) {
+		for (let i = this.vanishes.length - 1; i >= 0; i--) {
 			this.vanishes[i].update();
 			if (this.vanishes[i].alpha == 0) {
 				this.vanishes.splice(i, 1);
 			}
 		}
-		for (var i = this.sparkles.length - 1; i >= 0; i--) {
+		for (let i = this.sparkles.length - 1; i >= 0; i--) {
 			this.sparkles[i].update();
 			if (this.sparkles[i].alpha == 0) {
 				quakeMeterAppearance = Math.min(quakeMeterSize, quakeMeterAppearance + this.sparkles[i].quakeMeterFill);
@@ -546,8 +568,8 @@ class Vanish {
 		this.alpha = Math.max(0, this.alpha - EFFECTS_VANISH_FADE_SPEED);
 	}
 	draw() {
-		var px = BOARD_PADDING + this.x * PIECE_SIZE;
-		var py = this.y * PIECE_SIZE;
+		let px = BOARD_PADDING + this.x * PIECE_SIZE;
+		let py = this.y * PIECE_SIZE;
 		ctx.save();
 		ctx.translate(px + PIECE_SIZE / 2, py + PIECE_SIZE / 2);
 		ctx.rotate(this.theta * 1000);
@@ -573,11 +595,11 @@ class Sparkle {
 		this.dx *= EFFECTS_SPARKLE_HORIZONTAL_DRAG;
 		this.alpha = Math.max(0, this.alpha - EFFECTS_SPARKLE_FADE_SPEED);
 		if (QUAKE_METER && quakeMeterAppearance < quakeMeterSize) {
-			var attract = Math.pow(1 - this.alpha, 4);
+			let attract = Math.pow(1 - this.alpha, 4);
 			this.x = UI_QUAKE_METER_ATTRACT_X * attract + this.x * (1 - attract);
 			this.y = UI_QUAKE_METER_ATTRACT_Y * attract * 2 + this.y * (1 - attract * 2);
-			var hypot = Math.hypot(this.x - UI_QUAKE_METER_ATTRACT_X, this.y - UI_QUAKE_METER_ATTRACT_Y);
-			var closeAlpha = hypot < EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS ? (hypot / EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS) : 1;
+			let hypot = Math.hypot(this.x - UI_QUAKE_METER_ATTRACT_X, this.y - UI_QUAKE_METER_ATTRACT_Y);
+			let closeAlpha = hypot < EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS ? (hypot / EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS) : 1;
 			this.alpha = Math.min(this.alpha, closeAlpha);
 		} else {
 			this.dy -= EFFECTS_SPARKLE_LIFT;
@@ -590,7 +612,7 @@ class Sparkle {
 		ctx.fill();
 	}
 }
-var effects = new Effects();
+let effects = new Effects();
 
 function loop() {
 	window.requestAnimationFrame(loop);
@@ -601,10 +623,10 @@ function loop() {
 	// Setup.
 	if (state == StateEnum.SETUP) {
 		if (clock % SETUP_SPAWN_RATE == 0) {
-			var pieceNum = clock / SETUP_SPAWN_RATE;
+			let pieceNum = clock / SETUP_SPAWN_RATE;
 			if (pieceNum < SETUP_ROWS * BOARD_WIDTH) {
-				var x = pieceNum % BOARD_WIDTH;
-				new Piece(x);
+				let x = pieceNum % BOARD_WIDTH;
+				new Piece(x, SETUP_NO_CONNECTIONS);
 			}
 		}
 		if (clock == SETUP_ROWS * BOARD_WIDTH * SETUP_SPAWN_RATE + POST_SETUP_PAUSE) {
@@ -629,8 +651,8 @@ function loop() {
 	// Game over check.
 	if (state == StateEnum.RUNNING) {
 		spawnBlocked = true;
-		var gameOver = true;
-		for (var x = 0; x < BOARD_WIDTH; x++) {
+		let gameOver = true;
+		for (let x = 0; x < BOARD_WIDTH; x++) {
 			if (board[x][0] == null) {
 				spawnBlocked = false;
 			}
@@ -658,8 +680,8 @@ function loop() {
 	}
 	// Update pieces.	
 	if (state == StateEnum.SETUP || state == StateEnum.RUNNING) {
-		for (var x = 0; x < BOARD_WIDTH; x++) {
-			for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
+		for (let x = 0; x < BOARD_WIDTH; x++) {
+			for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
 				if (board[x][y] == null) {
 					continue;
 				}
@@ -673,10 +695,13 @@ function loop() {
 	if (comboDelay == 0) {
 		combo = 0;
 		if (scorePopup > 0) {
-			var drainAmount = Math.max(Math.round(scorePopup * UI_SCORE_POPUP_DRAIN_PERCENT), UI_SCORE_POPUP_DRAIN_MIN);
+			let drainAmount = Math.max(Math.round(scorePopup * UI_SCORE_POPUP_DRAIN_PERCENT), UI_SCORE_POPUP_DRAIN_MIN);
 			drainAmount = Math.min(scorePopup, drainAmount);
 			scorePopup -= drainAmount;
 			scoreAppearance += drainAmount;
+			if (clock % SFX_SCORE_REPETITION == 0) {
+				playSFX(ASSET_SFX_SCORE, .05);
+			}
 		}
 	}
 	if (state == StateEnum.RUNNING) {
@@ -691,7 +716,7 @@ function loop() {
 			levelTimer = LEVEL_RATE;
 		} else if (keysPressed.has(KeyBindings.INCREASE_LEVEL) && levelUpForceCooldown == 0) {
 			level++;
-			var add = Math.precisionRound(Math.lerp(MULTIPLIER_INCREMENT, MULTIPLIER_FORCE_INCREMENT, levelTimer / LEVEL_RATE), 2);
+			let add = Math.precisionRound(Math.lerp(MULTIPLIER_INCREMENT, MULTIPLIER_FORCE_INCREMENT, levelTimer / LEVEL_RATE), 2);
 			multiplier = Math.precisionRound(multiplier + add, 2);
 			levelUpForceCooldown = LEVEL_UP_FORCE_COOLDOWN;
 			levelTimer = LEVEL_RATE;
@@ -700,7 +725,7 @@ function loop() {
 		if (spawnTimer <= 0) {
 			if (!spawnBlocked) {
 				new Piece();
-				var rate = SPAWN_RATE_INITIAL + (level - 1) * SPAWN_RATE_INCREMENT;
+				let rate = SPAWN_RATE_INITIAL + Math.pow((level - 1) * SPAWN_RATE_INCREMENT, SPAWN_RATE_INCREMENT_EXPONENT);
 				spawnTimer += 60 / rate;
 			}
 		} else {
@@ -708,50 +733,46 @@ function loop() {
 		}
 	}
 	
-	// Screen shake.
-	if (quakeScreenShake > 0) {
-		screenShakeX = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
-		screenShakeY = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
-		quakeScreenShake = Math.max(0, quakeScreenShake - EFFECTS_QUAKE_FADE_SPEED);
-	} else {
-		screenShakeX = 0;
-		screenShakeY = 0;
-	}
 	// Draw pieces.
-	for (var x = 0; x < BOARD_WIDTH; x++) {
-		var pingpongX = x % 2 == 0 ? x / 2 : BOARD_WIDTH - (x + 1) / 2;
-		for (var y = 0; y < BOARD_HEIGHT; y++) {
+	for (let x = 0; x < BOARD_WIDTH; x++) {
+		let pingpongX = x % 2 == 0 ? x / 2 : BOARD_WIDTH - (x + 1) / 2;
+		for (let y = 0; y < BOARD_HEIGHT; y++) {
 			if (board[pingpongX][y] == null) {
 				continue;
 			}
 			board[pingpongX][y].draw();
 		}
 	}
+	// Create board mask.
 	boardCtx2.clearRect(0, 0, boardCanvas2.width, boardCanvas2.height);
 	boardCtx2.drawImage(boardCanvas, 0, 0);
 	// Draw desaturation overlay.
 	if (state == StateEnum.GAME_OVER) {
-		var alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
+		let alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
 		boardCtx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
 		boardCtx.globalCompositeOperation = 'saturation';
 		boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
 		boardCtx.globalCompositeOperation = 'source-over';
 	}
+	// Use board mask to draw board.
 	boardCtx2.globalCompositeOperation = 'source-in';
 	boardCtx2.drawImage(boardCanvas, 0, 0);
 	boardCtx2.globalCompositeOperation = 'source-over';
 	// Draw board.
+	let screenShakeX = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
+	let screenShakeY = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
+	quakeScreenShake = Math.max(0, quakeScreenShake - EFFECTS_QUAKE_FADE_SPEED);
 	ctx.drawImage(boardCanvas2, BOARD_PADDING + screenShakeX, screenShakeY);
 	// Draw base.
-	var baseY = BOARD_HEIGHT * PIECE_SIZE;
+	let baseY = BOARD_HEIGHT * PIECE_SIZE;
 	ctx.fillStyle = BASE_COLOR;
 	ctx.fillRect(BOARD_PADDING + screenShakeX, baseY + screenShakeY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY + EFFECTS_QUAKE_STRENGTH);
 	// Draw selection path.
 	if (selected.length > 1) {
-		var pathColor = "#FFFFFF";
-		var selectedColors = new Set();
-		for (var i = 0; i < selected.length; i++) {
-			var color = board[selected[i][0]][selected[i][1]].color;
+		let pathColor = "#FFFFFF";
+		let selectedColors = new Set();
+		for (let i = 0; i < selected.length; i++) {
+			let color = board[selected[i][0]][selected[i][1]].color;
 			if (selectedColors.has(color)) {
 				pathColor = SELECTION_INVALID_COLOR;
 				break;
@@ -761,8 +782,8 @@ function loop() {
 		ctx.strokeStyle = pathColor;
 		ctx.lineWidth = STROKE_WIDTH;
 		ctx.beginPath();
-		var x, y;
-		for (var i = 0; i < selected.length; i++) {
+		let x, y;
+		for (let i = 0; i < selected.length; i++) {
 			x = BOARD_PADDING + (selected[i][0] + .5) * PIECE_SIZE;
 			y = (selected[i][1] + .5) * PIECE_SIZE;
 			i == 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
@@ -781,21 +802,21 @@ function loop() {
 	ctx.fillStyle = "#FFFFFF";
 	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText(scoreAppearance, canvas.width - BOARD_PADDING, canvas.height / 2);
-	var leadingZeroes = Math.max(0, UI_SCORE_DIGITS - scoreAppearance.toString().length);
-	var scoreWidth = ctx.measureText(scoreAppearance).width;
+	let leadingZeroes = Math.max(0, UI_SCORE_DIGITS - scoreAppearance.toString().length);
+	let scoreWidth = ctx.measureText(scoreAppearance).width;
 	ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
 	if (scorePopup > 0) {
 		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-		ctx.fillText("+" + scorePopup, canvas.width - BOARD_PADDING, canvas.height * .565);
+		ctx.fillText("+" + scorePopup, canvas.width - BOARD_PADDING, canvas.height * .5625);
 	}
 	if (bonusTimer > 0) {
-		ctx.fillStyle = (clock % (UI_BONUS_FLASH_FRAMES * 2)) < UI_BONUS_FLASH_FRAMES ? "#FFFFFF": "#F0F0FF";
+		ctx.fillStyle = (clock % (UI_BONUS_FLASH_FRAMES * 2)) < UI_BONUS_FLASH_FRAMES ? "#FFFFFF": "#E9E9F9";
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .59375);	
+		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .5935);	
 	}
-	var levelPercent = levelTimer / LEVEL_RATE;
-	var levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
+	let levelPercent = levelTimer / LEVEL_RATE;
+	let levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
 	ctx.beginPath();
 	ctx.arc(levelX, levelY, UI_LEVEL_CIRCLE_RADIUS, Math.PI * 1.5, Math.PI * (1.5 - 2 * levelPercent), true);
 	ctx.lineTo(levelX, levelY);
@@ -814,7 +835,7 @@ function loop() {
 	}
 	if (QUAKE_METER) {
 		ctx.fillStyle = "#9090F0";
-		var offsetX = 0, offsetY = 0;
+		let offsetX = 0, offsetY = 0;
 		if (quakeMeter >= quakeMeterSize) {
 			offsetX = Math.randFloat(-1, 1) * UI_QUAKE_METER_SHAKE;
 			offsetY = Math.randFloat(-1, 1) * UI_QUAKE_METER_SHAKE;
@@ -822,15 +843,15 @@ function loop() {
 			ctx.textBaseline = 'top';
 			ctx.font = (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
 			ctx.fillText("uake ready!", UI_QUAKE_TEXT_X + offsetX, UI_QUAKE_TEXT_Y + offsetY);
-			var quakeWidth = ctx.measureText("uake ready!").width;
+			let quakeWidth = ctx.measureText("uake ready!").width;
 			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
 			ctx.fillText("Q", UI_QUAKE_TEXT_X - quakeWidth + offsetX, UI_QUAKE_TEXT_Y + offsetY);
 		} else if (quakeMeterAppearance >= quakeMeterSize * UI_QUAKE_METER_PRESHAKE_THRESHOLD) {
-			var scale = 1 - (quakeMeterSize - quakeMeterAppearance) / (quakeMeterSize * (1 - UI_QUAKE_METER_PRESHAKE_THRESHOLD));
+			let scale = 1 - (quakeMeterSize - quakeMeterAppearance) / (quakeMeterSize * (1 - UI_QUAKE_METER_PRESHAKE_THRESHOLD));
 			offsetX = Math.randFloat(-1, 1) * UI_QUAKE_METER_PRESHAKE * scale;
 			offsetY = Math.randFloat(-1, 1) * UI_QUAKE_METER_PRESHAKE * scale;
 		}
-		var quakeMeterFillPercent = quakeMeterAppearance / quakeMeterSize;
+		let quakeMeterFillPercent = quakeMeterAppearance / quakeMeterSize;
 		ctx.fillRect(UI_QUAKE_METER_X + UI_QUAKE_METER_STROKE / 2 + offsetX, UI_QUAKE_METER_Y + offsetY, (UI_QUAKE_METER_WIDTH - UI_QUAKE_METER_STROKE) * quakeMeterFillPercent, UI_QUAKE_METER_HEIGHT);
 		ctx.lineWidth = UI_QUAKE_METER_STROKE;
 		ctx.strokeStyle = "#FFFFFF";
@@ -856,7 +877,7 @@ function loop() {
 		ctx.fillStyle = "rgba(155, 90, 110, " + (gameOverClock / UI_GAME_OVER_FADE_TIME) + ")";
 		ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
 		ctx.fillText("GAME OVER", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
-		var gameOverWidth = ctx.measureText("GAME OVER").width;
+		let gameOverWidth = ctx.measureText("GAME OVER").width;
 		ctx.textBaseline = 'top';
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
 		ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
@@ -874,7 +895,7 @@ function loop() {
 		if (state != StateEnum.TITLE) {
 			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
 		}
-		var logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2;
+		let logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2;
 		ctx.globalAlpha = titleFade;
 		ctx.drawImage(ASSET_IMAGE_LOGO, logoX, canvas.height / 5, UI_TITLE_LOGO_SIZE, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width);
 		ctx.globalAlpha = 1;
@@ -882,15 +903,15 @@ function loop() {
 		ctx.textBaseline = 'middle';
 		ctx.fillStyle = "rgba(255, 255, 255, " + titleFade + ")";
 		ctx.font = "200 " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
-		for (var i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
+		for (let i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
 			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
 		}
 		ctx.textAlign ='right';
 		ctx.textBaseline = 'alphabetic';
 		ctx.fillStyle = "rgba(128, 128, 128, " + titleFade + ")";
 		ctx.font = (UI_SCORE_FONT_SIZE / 6) + "px Source Sans Pro";
-		for (var i = 0; i < CREDITS.length; i++) {
-			var creditY = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (CREDITS.length - i - 1);
+		for (let i = 0; i < CREDITS.length; i++) {
+			let creditY = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (CREDITS.length - i - 1);
 			ctx.fillText(CREDITS[i], canvas.width - BOARD_PADDING / 2, creditY);
 		}
 	}
@@ -914,14 +935,14 @@ function loop() {
 }
 
 canvas.addEventListener('mousedown', function(e) {
-	var pos = mousePos(canvas, e);
+	let pos = mousePos(canvas, e);
 	mouseDownHelper(pos.x, pos.y, e.which == 3);
 });
 canvas.addEventListener('touchstart', function(e) {
 	if (e.touches.length == 1) {
 		e.preventDefault();
 	}
-	var pos = touchPos(canvas, e);
+	let pos = touchPos(canvas, e);
 	mouseDownHelper(pos.x, pos.y, false);
 });
 function mouseDownHelper(x, y, rightClick) {
@@ -940,7 +961,7 @@ function mouseDownHelper(x, y, rightClick) {
 		selected = [];
 		return;
 	}
-	var quakeTextWidth = UI_SCORE_FONT_SIZE * 3, quakeTextHeight = UI_SCORE_FONT_SIZE / 2;
+	let quakeTextWidth = UI_SCORE_FONT_SIZE * 3, quakeTextHeight = UI_SCORE_FONT_SIZE / 2;
 	if (x >= UI_QUAKE_TEXT_X - quakeTextWidth && x <= UI_QUAKE_TEXT_X && y >= UI_QUAKE_TEXT_Y && y <= UI_QUAKE_TEXT_Y + quakeTextHeight) {
 		keysPressed.add(KeyBindings.QUAKE);
 		return;
@@ -949,14 +970,14 @@ function mouseDownHelper(x, y, rightClick) {
 	selectCheck(x, y);
 }
 canvas.addEventListener('mousemove', function(e) {
-	var pos = mousePos(canvas, e);
+	let pos = mousePos(canvas, e);
 	mouseMoveHelper(pos.x, pos.y);
 });
 canvas.addEventListener('touchmove', function(e) {
 	if (e.touches.length == 1) {
 		e.preventDefault();
 	}
-	var pos = touchPos(canvas, e);
+	let pos = touchPos(canvas, e);
 	mouseMoveHelper(pos.x, pos.y);
 });
 function mouseMoveHelper(x, y) {
@@ -981,21 +1002,21 @@ function mouseUpHelper() {
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
-	var colorCheck = new Set(new Array(COLORS.length).keys());
-	for (var i = 0; i < selected.length; i++) {
+	let colorCheck = new Set(new Array(COLORS.length).keys());
+	for (let i = 0; i < selected.length; i++) {
 		colorCheck.delete(board[selected[i][0]][selected[i][1]].color)
 	}
 	if (colorCheck.size == 0) {
-		var toDestroy = new Set();
-		var piecesDestroyed = 0;
-		for (var i = 0; i < selected.length; i++) {
+		let toDestroy = new Set();
+		let piecesDestroyed = 0;
+		for (let i = 0; i < selected.length; i++) {
 			toDestroy.add(board[selected[i][0]][selected[i][1]].root);
 			piecesDestroyed += board[selected[i][0]][selected[i][1]].root.children.size;
 		}
 		scorePoints(Math.round(piecesDestroyed * 100 * multiplier));
 		// Play sound effects.
 		playSFX(ASSET_SFX_BREAK, .2);
-		var stingStrength = (piecesDestroyed - COLORS.length) / SFX_STING_MAX_VOL_PIECES;
+		let stingStrength = (piecesDestroyed - COLORS.length) / SFX_STING_MAX_VOL_PIECES;
 		if (piecesDestroyed > SFX_STING_MAX_VOL_PIECES) {
 			ASSET_SFX_STING.rate(1 + .1 * (piecesDestroyed - SFX_STING_MAX_VOL_PIECES));
 		} else {
@@ -1005,7 +1026,7 @@ function mouseUpHelper() {
 		for (let item of toDestroy) {
 			item.destroy();
 		}
-		fallCheck(); // TODO: Keep this kind of thing in the main loop.
+		fallCheck();
 	}
 
 	selected = [];
@@ -1029,15 +1050,22 @@ function selectCheck(x, y) {
 		selectCheckHelper(x, y);
 		return;
 	}
-	var coor = selected[selected.length - 1].slice();
-	var dx = x - coor[0];
-	while (coor[0] != x) {
-		coor[0] += dx / Math.abs(dx);
+	let coor = selected[selected.length - 1].slice();
+	let dx = x - coor[0];
+	dx /= Math.abs(dx);
+	while (coor[0] != x && coor[0] + dx >= 0 && coor[0] + dx < BOARD_WIDTH && board[coor[0] + dx][coor[1]] != null && board[coor[0] + dx][coor[1]].fallDistance == 0) {
+		coor[0] += dx;
 		selectCheckHelper(coor[0], coor[1]);
 	}
-	var dy = y - coor[1];
-	while (coor[1] != y) {
-		coor[1] += dy / Math.abs(dy);
+	let dy = y - coor[1];
+	dy /= Math.abs(dy);
+	while (coor[1] != y && coor[1] + dy >= 0 && coor[1] + dy < BOARD_HEIGHT && board[coor[0]][coor[1] + dy] != null && board[coor[0]][coor[1] + dy].fallDistance == 0) {
+		coor[1] += dy;
+		selectCheckHelper(coor[0], coor[1]);
+	}
+	// Repeat earlier while to cover scenarios where the path must go vertically then horizontally.
+	while (coor[0] != x && coor[0] + dx >= 0 && coor[0] + dx < BOARD_WIDTH && board[coor[0] + dx][coor[1]] != null && board[coor[0] + dx][coor[1]].fallDistance == 0) {
+		coor[0] += dx;
 		selectCheckHelper(coor[0], coor[1]);
 	}
 }
@@ -1047,8 +1075,8 @@ function selectCheckHelper(x, y) {
 	if (board[x][y] == null || board[x][y].fallDistance > 0) {
 		return;
 	}
-	var coor = [x, y];
-	var i = Array.containsArray(selected, coor);
+	let coor = [x, y];
+	let i = Array.containsArray(selected, coor);
 	if (i != -1) {
 		selected.splice(i + 1);
 		return;
@@ -1057,8 +1085,8 @@ function selectCheckHelper(x, y) {
 		return;
 	}
 	if (selected.length > 0) {
-		var last = selected[selected.length - 1];
-		var d = Math.abs(last[0] - x) + Math.abs(last[1] - y);
+		let last = selected[selected.length - 1];
+		let d = Math.abs(last[0] - x) + Math.abs(last[1] - y);
 		if (d != 1) {
 			return;
 		}
@@ -1068,33 +1096,33 @@ function selectCheckHelper(x, y) {
 
 function fallCheck() {
 	// Find to-ground fall distances of shapes.
-	var fallDistances = new Map();
-	for (var x = 0; x < BOARD_WIDTH; x++) {
-		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
+	let fallDistances = new Map();
+	for (let x = 0; x < BOARD_WIDTH; x++) {
+		for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
 			if (board[x][y] == null) {
 				continue;
 			}
-			var fallDistance = BOARD_HEIGHT - 1 - y;
+			let fallDistance = BOARD_HEIGHT - 1 - y;
 			if (!fallDistances.has(board[x][y].root) || fallDistances.get(board[x][y].root) > fallDistance) {
 				fallDistances.set(board[x][y].root, fallDistance);
 			}
 		}
 	}
 	// Update fall distances until none of them change.
-	var changed = true;
+	let changed = true;
 	while (changed) {
 		changed = false;
 		for (const root of fallDistances.keys()) {
 			for (const child of root.children) {
 				// For each piece in this shape, look down until we hit a piece from another shape, update our fall distance if necessary.
-				for (var y = child.y + 1; y < BOARD_HEIGHT; y++) {
+				for (let y = child.y + 1; y < BOARD_HEIGHT; y++) {
 					if (board[child.x][y] == null) {
 						continue;
 					}
 					if (board[child.x][y].root == root) {
 						break;
 					}
-					var newDistance = fallDistances.get(board[child.x][y].root) + Math.abs(y - child.y - 1);
+					let newDistance = fallDistances.get(board[child.x][y].root) + Math.abs(y - child.y - 1);
 					if (newDistance < fallDistances.get(root)) {
 						fallDistances.set(root, newDistance);
 						changed = true;
@@ -1105,12 +1133,12 @@ function fallCheck() {
 		}
 	}
 	// Move pieces and add fall distances as calculated.
-	for (var x = 0; x < BOARD_WIDTH; x++) {
-		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
+	for (let x = 0; x < BOARD_WIDTH; x++) {
+		for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
 			if (board[x][y] == null) {
 				continue;
 			}
-			var fallDistance = fallDistances.get(board[x][y].root);
+			let fallDistance = fallDistances.get(board[x][y].root);
 			if (fallDistance > 0) {
 				board[x][y].y += fallDistance;
 				board[x][y].fallDistance += fallDistance;
@@ -1123,7 +1151,7 @@ function fallCheck() {
 
 function scorePoints(points, increaseCombo = true) {
 	if (increaseCombo && combo >= 1) {
-		var comboPoints = Math.round(200 * combo * multiplier);
+		let comboPoints = Math.round(200 * combo * multiplier);
 		points += comboPoints;
 		bonusText = (combo + 1) + "X COMBO +" + comboPoints;
 		bonusTimer = UI_BONUS_TIMER;
@@ -1143,20 +1171,20 @@ function scorePoints(points, increaseCombo = true) {
 }
 
 function perspective(x, y) {
-	var width;
+	let width;
 	if (BOARD_WIDTH % 2 == 0) {
-		var center = BOARD_WIDTH / 2 - .5;
-		var dist = Math.abs(x - center) - .5;
+		let center = BOARD_WIDTH / 2 - .5;
+		let dist = Math.abs(x - center) - .5;
 		if (x > center) {
 			dist *= -1;
 		}
 		width = dist / (center - .5) * PERSPECTIVE_MAX_WIDTH;
 	} else {
-		var halfWidth = Math.floor(BOARD_WIDTH / 2);
+		let halfWidth = Math.floor(BOARD_WIDTH / 2);
 		width = (halfWidth - x) / halfWidth * PERSPECTIVE_MAX_WIDTH;
 	}
-	var heightFactor = (BOARD_HEIGHT - y - 1) / BOARD_HEIGHT;
-	var height = Math.lerp(PERSPECTIVE_MIN_HEIGHT, PERSPECTIVE_MAX_HEIGHT, heightFactor);
+	let heightFactor = (BOARD_HEIGHT - y - 1) / BOARD_HEIGHT;
+	let height = Math.lerp(PERSPECTIVE_MIN_HEIGHT, PERSPECTIVE_MAX_HEIGHT, heightFactor);
 	return [width, height];
 }
 
@@ -1188,8 +1216,8 @@ function nextPolyomino() {
 	}
 	scorePoints(polyominoBounty * multiplier);
 	polyominosScored++;
-	var n = Math.floor((Math.sqrt(score - 1 + 2500) + 350) / 100); // thanks wolfram alpha
-	var oldPolyomino = polyomino;
+	let n = Math.floor((Math.sqrt(score - 1 + 2500) + 350) / 100); // thanks wolfram alpha
+	let oldPolyomino = polyomino;
 	while (polyomino.representations.has(oldPolyomino.representations.values().next().value)) {
 		polyomino = Polyomino.random(n);
 	}
@@ -1197,11 +1225,11 @@ function nextPolyomino() {
 }
 function drawPolyominoUI() {
 	// Draw polyomino.
-	var polyPieceSize = UI_POLYOMINO_AREA_SIZE / (Math.max(polyomino.maxX, polyomino.maxY) + 1);
-	var xOffset = polyomino.maxX < polyomino.maxY ? polyomino.maxY - polyomino.maxX : 0;
+	let polyPieceSize = UI_POLYOMINO_AREA_SIZE / (Math.max(polyomino.maxX, polyomino.maxY) + 1);
+	let xOffset = polyomino.maxX < polyomino.maxY ? polyomino.maxY - polyomino.maxX : 0;
 	ctx.fillStyle = "rgba(255, 255, 255, 1)";
-	for (var i = 0; i < polyomino.coors.length; i++) {
-		var coor = polyomino.coors[i];
+	for (let i = 0; i < polyomino.coors.length; i++) {
+		let coor = polyomino.coors[i];
 		ctx.fillRect(canvas.width - BOARD_PADDING - UI_POLYOMINO_AREA_SIZE + (coor[0] + xOffset) * polyPieceSize + polyPieceSize * (1 - UI_POLYOMINO_BLOCK_FILL),
 					 BOARD_PADDING + coor[1] * polyPieceSize,
 					 polyPieceSize * UI_POLYOMINO_BLOCK_FILL,
@@ -1220,7 +1248,7 @@ function drawPolyominoUI() {
 		ctx.textAlign= 'right';
 		ctx.textBaseline = 'top';
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-		var tooltipY = BOARD_PADDING + polyPieceSize * (polyomino.maxY + 1);
+		let tooltipY = BOARD_PADDING + polyPieceSize * (polyomino.maxY + 1);
 		ctx.fillText('clear a piece with this shape (can', canvas.width - BOARD_PADDING, tooltipY);
 		ctx.fillText('be rotated or reflected) to gain this', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5));
 		ctx.fillText('many points, times your multiplier', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5) * 2);
@@ -1228,8 +1256,8 @@ function drawPolyominoUI() {
 }
 
 function quake() {
-	for (var x = 0; x < BOARD_WIDTH; x++) {
-		for (var y = BOARD_HEIGHT - 1; y >= 0; y--) {
+	for (let x = 0; x < BOARD_WIDTH; x++) {
+		for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
 			if (board[x][y] == null) {
 				continue;
 			}
