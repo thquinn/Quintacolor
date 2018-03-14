@@ -1,22 +1,23 @@
 // TODO: Music
 // TODO: Final polish!
 // 		Improve the vanishes for the new 3D look. A buncha triangles?
-//		Better on-screen buttons. Click the level indicator to level up. Use HTML5 hit regions?
+//		More on-screen buttons. Mute SFX, mute music, pause.
 //		Better sound effects.
 //			Redo the mixing for multiple plays.
 //			Current sting specific to combos, align playback rate to chromatic scale ascending.
 //			A new effect for large piece destruction.
 //		Do another pass on colors.
 //		Redo the background incorporating the board perspective?
+// TODO: A speeder, replacing forced level increase? People are still having to wait for pieces, and the 12% over the 5% isn't that viscerally fun.
 // TODO: Drawing optimizations
 //		Try to rid of the second board canvas which seems necessary because the saturation blend mode is changing the alpha channel.
 // TODO: Move logic from mouse events to the main thread
 // TODO: Fix connections still breaking while falling side by side.
 // TODO: Show an example path if X seconds pass without the player getting points?
-// TODO: Fix mouse coordinates on scaled canvas in Firefox.
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
 // TODO: Add sound credits, maybe just in source file?
+// TODO: findRandomMatch is creating an occasional caught type error.
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Google Analytics on the page.
 
@@ -70,6 +71,10 @@ const COMBO_DELAY = 3 * 60; // 3 seconds
 const COMBO_POINTS = 200;
 // Board appearance constants.
 const PIECE_SIZE = 60;
+const BOARD_3D = true;
+const PERSPECTIVE_MAX_WIDTH = .4;
+const PERSPECTIVE_MIN_HEIGHT = 0;
+const PERSPECTIVE_MAX_HEIGHT = .33;
 const FRONT_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 const SIDE_COLORS = ['#E50000', '#1EA0E5', '#D6BA00', '#00B80F', '#7339E5'];
 const BOTTOM_COLORS = ['#CC0000', '#1B8ECC', '#BDA400', '#009E0D', '#6633CC'];
@@ -86,10 +91,6 @@ const SELECTION_END_RADIUS = PIECE_SIZE / 6;
 const SELECTION_INVALID_COLOR = '#FFD0D0';
 const BOARD_GAME_OVER_DESATURATION = .95;
 const UI_WIDTH = PIECE_SIZE * 8;
-const BOARD_3D = true;
-const PERSPECTIVE_MAX_WIDTH = .4;
-const PERSPECTIVE_MIN_HEIGHT = 0;
-const PERSPECTIVE_MAX_HEIGHT = .33;
 // Canvas setup.
 const canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
@@ -110,6 +111,8 @@ const UI_SCORE_POPUP_DRAIN_MIN = 11;
 const UI_BONUS_TIMER = 3 * 60; // 3 seconds
 const UI_BONUS_FLASH_FRAMES = 3;
 const UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
+const UI_LEVEL_CIRCLE_X = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS;
+const UI_LEVEL_CIRCLE_Y = canvas.height * .4125;
 const UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
 const UI_POLYOMINO_BLOCK_FILL = .8;
 const UI_GAME_OVER_FADE_TIME = 60;
@@ -122,6 +125,7 @@ const UI_QUAKE_METER_Y = canvas.height * .9425;
 const UI_QUAKE_METER_EMPTY_COLOR = '#8383A8';
 const UI_QUAKE_METER_FULL_COLOR = '#FAFAFF';
 const UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
+const UI_EXAMPLE_MATCH_DELAY = 10 * 60; // 10 seconds
 // Text constants.
 const TEXT_INSTRUCTIONS = ["There are five colors of blocks.",
 						   "Draw a line through one block of each color.",
@@ -129,11 +133,10 @@ const TEXT_INSTRUCTIONS = ["There are five colors of blocks.",
 						   "Survive as long as you can!",
 						   "",
 						   "Click to begin."];
-const TEXT_KEYS = ["Space: quake",
-				   "Z: increase level",
+const TEXT_KEYS = ["Z: increase level",
 				   "P: pause",
 				   "M: toggle mute"];
-const TEXT_CREDITS = ["Quintacolor v 0.9.5",
+const TEXT_CREDITS = ["Quintacolor v 0.9.6",
 			     "a game by Tom Quinn (thquinn.github.io)",
 			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
 			     "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
@@ -188,9 +191,10 @@ const ASSET_SFX_SCORE = new Howl({
 const ASSET_SFX_QUAKE = new Howl({
   src: ['quintacolor_assets/quake.wav']
 });
+ASSET_SFX_QUAKE.rate(2);
 
 // Initialize all game variables.
-let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeSpawnDelay, quakeScreenShake, quakeLightEffect, sfxMap;
+let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeSpawnDelay, quakeScreenShake, quakeLightEffect, sfxMap, exampleMatch;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
@@ -228,6 +232,7 @@ function start() {
 	quakeScreenShake = 0;
 	quakeLightEffect = 0;
 	sfxMap = new Map();
+	exampleMatch = null;
 }
 
 class Piece {
@@ -678,6 +683,7 @@ function loop() {
 		}
 		if (gameOver) {
 			selected = [];
+			quakeMeter = 0;
 			state = StateEnum.GAME_OVER;
 			if (localStorage.highScore == null || localStorage.highScore < score) {
 				localStorage.highScore = score;
@@ -687,11 +693,12 @@ function loop() {
 
 	// Quake?
 	if (quakeMeter < quakeMeterAppearance) {
-		quakeMeterAppearance = quakeMeter * .25 + quakeMeterAppearance * .75;
+		quakeMeterAppearance = quakeMeter * .067 + quakeMeterAppearance * .933;
 	}
 	if (state == StateEnum.RUNNING && QUAKE_METER && keysPressed.has(KeyBindings.QUAKE) && quakeMeter >= quakeMeterSize) {
 		quake();
 		quakeMeter = 0;
+		quakeMeterAppearance = 0;
 		quakeMeterSize += QUAKE_METER_SIZE_INCREMENT;
 	}
 	// Update pieces.	
@@ -786,8 +793,8 @@ function loop() {
 	ctx.fillStyle = BASE_COLOR;
 	ctx.fillRect(BOARD_PADDING + screenShakeX, baseY + screenShakeY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY + EFFECTS_QUAKE_STRENGTH);
 	// Draw selection path.
+	let pathColor = '#FFFFFF';
 	if (selected.length > 1) {
-		let pathColor = "#FFFFFF";
 		let selectedColors = new Set();
 		for (let i = 0; i < selected.length; i++) {
 			let color = board[selected[i][0]][selected[i][1]].color;
@@ -834,20 +841,19 @@ function loop() {
 		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .6);	
 	}
 	let levelPercent = levelTimer / LEVEL_RATE;
-	let levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
 	ctx.beginPath();
-	ctx.arc(levelX, levelY, UI_LEVEL_CIRCLE_RADIUS, Math.PI * 1.5, Math.PI * (1.5 - 2 * levelPercent), true);
-	ctx.lineTo(levelX, levelY);
+	ctx.arc(UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y, UI_LEVEL_CIRCLE_RADIUS, Math.PI * 1.5, Math.PI * (1.5 - 2 * levelPercent), true);
+	ctx.lineTo(UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y);
 	ctx.fillStyle = "rgba(255, 255, 255, .5)";
 	ctx.fill();
 	ctx.textAlign = 'center';
 	ctx.fillStyle = "#9090F0";
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-	ctx.fillText("Level", levelX, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
-	ctx.fillText("Multiplier", levelX - UI_LEVEL_CIRCLE_RADIUS * 3, levelY - UI_LEVEL_CIRCLE_RADIUS * .4);
+	ctx.fillText("Level", UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y - UI_LEVEL_CIRCLE_RADIUS * .4);
+	ctx.fillText("Multiplier", UI_LEVEL_CIRCLE_X - UI_LEVEL_CIRCLE_RADIUS * 3, UI_LEVEL_CIRCLE_Y - UI_LEVEL_CIRCLE_RADIUS * .4);
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-	ctx.fillText(level, levelX, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
-	ctx.fillText(Math.round(multiplier * 100) + '%', levelX - UI_LEVEL_CIRCLE_RADIUS * 3, levelY + UI_LEVEL_CIRCLE_RADIUS * .175);
+	ctx.fillText(level, UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y + UI_LEVEL_CIRCLE_RADIUS * .175);
+	ctx.fillText(Math.round(multiplier * 100) + '%', UI_LEVEL_CIRCLE_X - UI_LEVEL_CIRCLE_RADIUS * 3, UI_LEVEL_CIRCLE_Y + UI_LEVEL_CIRCLE_RADIUS * .175);
 	if (BOUNTY_POLYOMINOS) {
 		drawPolyominoUI();
 	}
@@ -896,6 +902,23 @@ function loop() {
 			ctx.fillText('click here or press SPACE to settle the board', UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH / 2, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2);
 		}
 	}
+	// Draw example match.
+	if (score == 0 && clock > UI_EXAMPLE_MATCH_DELAY && selected.length == 0) {
+		if (exampleMatch == null) {
+			exampleMatch = findRandomMatch(board, COLORS.length);
+		}
+		let alpha = Math.min((clock - UI_EXAMPLE_MATCH_DELAY) / 100, 1);
+		ctx.strokeStyle = "rgba(255, 255, 255, " + alpha + ")";
+		ctx.lineWidth = STROKE_WIDTH / 2;
+		ctx.setLineDash([PIECE_SIZE / 10, PIECE_SIZE / 4]);
+		ctx.beginPath();
+		ctx.moveTo(BOARD_PADDING + (exampleMatch[0][0] + .5) * PIECE_SIZE, (exampleMatch[0][1] + .5) * PIECE_SIZE);
+		for (let i = 1; i < exampleMatch.length; i++) {
+			ctx.lineTo(BOARD_PADDING + (exampleMatch[i][0] + .5) * PIECE_SIZE, (exampleMatch[i][1] + .5) * PIECE_SIZE);
+		}
+		ctx.stroke();
+		ctx.setLineDash([]);
+	}
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'right';
 		ctx.textBaseline = 'alphabetic';
@@ -918,8 +941,8 @@ function loop() {
 			ctx.fillRect(0, 0, canvas.width, canvas.height);
 		}
 		// Gradient.
-		var gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
-		var gradientAlpha = quakeLightEffect * (clock % 2 == 0 ? 1.25 : 1);
+		var gradient = ctx.createLinearGradient(0, canvas.height, 0, -canvas.height * .25);
+		var gradientAlpha = quakeLightEffect * (clock % 2 == 0 ? 1.5 : 1);
 		gradient.addColorStop(0, 'rgba(255,255,255, ' + gradientAlpha + ')');
 		gradient.addColorStop(1, 'rgba(255,255,255,0)');
 		ctx.fillStyle = gradient;
@@ -1007,6 +1030,10 @@ function mouseDownHelper(x, y, rightClick) {
 	}
 	if (rightClick) {
 		selected = [];
+		return;
+	}
+	if (Math.hypot(x - UI_LEVEL_CIRCLE_X, y - UI_LEVEL_CIRCLE_Y) <= UI_LEVEL_CIRCLE_RADIUS) {
+		keysPressed.add(KeyBindings.INCREASE_LEVEL);
 		return;
 	}
 	if (x >= UI_QUAKE_METER_X && x <= UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH && y >= UI_QUAKE_METER_Y && y <= UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) {
@@ -1319,9 +1346,7 @@ function quake() {
 	quakeSpawnDelay = QUAKE_SPAWN_DELAY;
 	quakeScreenShake = 1;
 	quakeLightEffect = 1;
-	ASSET_SFX_QUAKE.rate(2);
-	ASSET_SFX_QUAKE.volume(.25);
-	ASSET_SFX_QUAKE.play();
+	playSFX(ASSET_SFX_QUAKE, .25);
 }
 
 start();

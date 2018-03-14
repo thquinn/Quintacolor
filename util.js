@@ -1,7 +1,7 @@
-var NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+let NEIGHBORS = [[-1, 0], [1, 0], [0, -1], [0, 1]];
 
 Math.precisionRound = function (number, precision) {
-  var factor = Math.pow(10, precision);
+  let factor = Math.pow(10, precision);
   return Math.round(number * factor) / factor;
 }
 
@@ -25,9 +25,9 @@ Math.randInt = function (min, max) {
 };
 
 Math.pickFromWeightArray = function (arr) {
-  var total = arr.reduce((a, b) => a + b, 0);
-  var selector = Math.random() * total;
-  for (var i = 0; i < arr.length; i++) {
+  let total = arr.reduce((a, b) => a + b, 0);
+  let selector = Math.random() * total;
+  for (let i = 0; i < arr.length; i++) {
     if (selector <= arr[i]) {
       return i;
     }
@@ -44,27 +44,29 @@ Array.equal = function (a, b) {
   // If you don't care about the order of the elements inside
   // the array, you should sort both arrays here.
 
-  for (var i = 0; i < a.length; ++i) {
+  for (let i = 0; i < a.length; ++i) {
     if (a[i] !== b[i]) return false;
   }
   return true;
 }
 Array.containsArray = function (a, b) {
-  for (var i = 0; i < a.length; ++i) {
+  for (let i = 0; i < a.length; ++i) {
       if (Array.equal(a[i], b)) return i;
   }
   return -1;
 }
 
 function mousePos(el, e) {
-  var xPosition = 0;
-  var yPosition = 0;
+  let xPosition = 0;
+  let yPosition = 0;
+  let xScale = el.width / el.clientWidth;
+  let yScale = el.width / el.clientWidth;
  
   while (el) {
     if (el.tagName == "BODY") {
       // deal with browser quirks with body/window/document and page scroll
-      var xScrollPos = el.scrollLeft || document.documentElement.scrollLeft;
-      var yScrollPos = el.scrollTop || document.documentElement.scrollTop;
+      let xScrollPos = el.scrollLeft || document.documentElement.scrollLeft;
+      let yScrollPos = el.scrollTop || document.documentElement.scrollTop;
  
       xPosition += (el.offsetLeft - xScrollPos + el.clientLeft);
       yPosition += (el.offsetTop - yScrollPos + el.clientTop);
@@ -76,22 +78,57 @@ function mousePos(el, e) {
     el = el.offsetParent;
   }
   return {
-    x: e.clientX - xPosition,
-    y: e.clientY - yPosition,
+    x: (e.clientX - xPosition) * xScale,
+    y: (e.clientY - yPosition) * yScale,
   };
 }
 function touchPos(el, e) {
-  var rect = el.getBoundingClientRect();
+  let xScale = el.width / el.clientWidth;
+  let yScale = el.width / el.clientWidth;
+  let rect = el.getBoundingClientRect();
   return {
-    x: e.touches[0].clientX - rect.left,
-    y: e.touches[0].clientY - rect.top
+    x: (e.touches[0].clientX - rect.left) * xScale,
+    y: (e.touches[0].clientY - rect.top) * yScale,
   };
+}
+
+function findRandomMatch(board, n) {
+  while (true) {
+    let x = Math.randInt(0, board.length);
+    let y = Math.randInt(0, board[0].length);
+    if (board[x][y] == null || board[x][y].fallDistance > 0) {
+      continue;
+    }
+    let match = [[x, y]];
+    let colors = new Set([board[x][y].color]);
+    while (match.length < n) {
+      let success = false;
+      for (let i = 0; i < NEIGHBORS.length; i++) {
+        let last = match[match.length - 1];
+        let nx = last[0] + NEIGHBORS[i][0];
+        let ny = last[1] + NEIGHBORS[i][1];
+        if (nx < 0 || nx > board.length || ny < 0 || ny > board[0].length || board[nx][ny] == null || colors.has(board[nx][ny].color)) {
+          continue;
+        }
+        success = true;
+        match.push([nx, ny]);
+        colors.add(board[nx][ny].color);
+        break;
+      }
+      if (!success) {
+        break;
+      }
+    }
+    if (match.length == n) {
+      return match;
+    }
+  }
 }
 
 class Polyomino {
   constructor(coors) {
     this.coors = coors;
-    var minX = Number.MAX_SAFE_INTEGER, minY = Number.MAX_SAFE_INTEGER;
+    let minX = Number.MAX_SAFE_INTEGER, minY = Number.MAX_SAFE_INTEGER;
     this.maxX = Number.MIN_SAFE_INTEGER;
     this.maxY = Number.MIN_SAFE_INTEGER;
     for (let coor of coors) {
@@ -110,8 +147,8 @@ class Polyomino {
     }
     this.maxX -= minX;
     this.maxY -= minY;
-    var arr = new Array(this.maxX);
-    for (var i = 0; i <= this.maxX; i++) {
+    let arr = new Array(this.maxX);
+    for (let i = 0; i <= this.maxX; i++) {
       arr[i] = new Array(this.maxY + 1).fill('.');
     }
     for (let coor of coors) {
@@ -128,7 +165,7 @@ class Polyomino {
     }
     this.representations.add(arr.map(e => e.join('')).join(','));
     this.representations.add(arr.map(e => e.join('')).reverse().join(','));
-    var arrRot = arr[0].map((_, c) => arr.map(r => r[c]));
+    let arrRot = arr[0].map((_, c) => arr.map(r => r[c]));
     this.representations.add(arrRot.map(e => e.join('')).join(','));
     this.representations.add(arrRot.map(e => e.join('')).reverse().join(','));
     for (let a of arrRot) {
@@ -142,8 +179,8 @@ class Polyomino {
     if (piece.children.size != this.coors.length) {
       return false;
     }
-    var minX = Number.MAX_SAFE_INTEGER, minY = Number.MAX_SAFE_INTEGER;
-    var maxX = Number.MIN_SAFE_INTEGER, maxY = Number.MIN_SAFE_INTEGER;
+    let minX = Number.MAX_SAFE_INTEGER, minY = Number.MAX_SAFE_INTEGER;
+    let maxX = Number.MIN_SAFE_INTEGER, maxY = Number.MIN_SAFE_INTEGER;
     for (let child of piece.children) {
       if (child.x < minX) {
         minX = child.x;
@@ -160,8 +197,8 @@ class Polyomino {
     }
     maxX -= minX;
     maxY -= minY;
-    var arr = new Array(maxX);
-    for (var i = 0; i <= maxX; i++) {
+    let arr = new Array(maxX);
+    for (let i = 0; i <= maxX; i++) {
       arr[i] = new Array(maxY + 1).fill('.');
     }
     for (let child of piece.children) {
@@ -171,16 +208,16 @@ class Polyomino {
   }
 
   static random(n) {
-    var coors = new Map();
-    var frontier = new Map();
+    let coors = new Map();
+    let frontier = new Map();
     frontier.set([0, 0].toString(), [0, 0]);
     while (coors.size < n) {
-      var nextKey = Array.from(frontier.keys())[Math.randInt(0, frontier.size)];
-      var nextVal = frontier.get(nextKey);
+      let nextKey = Array.from(frontier.keys())[Math.randInt(0, frontier.size)];
+      let nextVal = frontier.get(nextKey);
       coors.set(nextKey, nextVal);
       frontier.delete(nextKey);
       for (let neighbor of NEIGHBORS) {
-        var nextFrontier = [nextVal[0] + neighbor[0], nextVal[1] + neighbor[1]];
+        let nextFrontier = [nextVal[0] + neighbor[0], nextVal[1] + neighbor[1]];
         if (!coors.has(nextFrontier.toString())) {
           frontier.set(nextFrontier.toString(), nextFrontier);
         }
