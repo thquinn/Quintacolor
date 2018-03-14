@@ -1,29 +1,22 @@
 // TODO: Music
 // TODO: Final polish!
-//		Reskin quake, incorporate the meter into the base.
-//			Darken the background while it's happening.
-//			Sound effect.
-//		Spice up the base a little.
-//		Redo the background, incorporate the board perspective.
 // 		Improve the vanishes for the new 3D look. A buncha triangles?
-//		Better on-screen buttons. Click the level indicator to level up.
-//		Better sparkles.
+//		Better on-screen buttons. Click the level indicator to level up. Use HTML5 hit regions?
 //		Better sound effects.
-//			Redo the mixing for multiple plays, align playback rate changes to the chromatic scale.
+//			Redo the mixing for multiple plays.
+//			Current sting specific to combos, align playback rate to chromatic scale ascending.
+//			A new effect for large piece destruction.
 //		Do another pass on colors.
-// TODO: One more pass on the quake mechanic
-// TODO: Space to quake, move level increase somewhere else.
-// TODO: Fix mouse coordinates on scaled canvas in Firefox.
+//		Redo the background incorporating the board perspective?
 // TODO: Drawing optimizations
 //		Try to rid of the second board canvas which seems necessary because the saturation blend mode is changing the alpha channel.
-// TODO: Combine SFX into a single wav, use Howler's "audio sprites"
-// TODO: Programmatic front, side, and bottom colors derived from COLORS
 // TODO: Move logic from mouse events to the main thread
-// TODO: Music/sfx mute buttons
-// TODO: Fix connections still breaking while falling in parallel.
+// TODO: Fix connections still breaking while falling side by side.
 // TODO: Show an example path if X seconds pass without the player getting points?
-// TODO: Add sound credits
-// TODO: Quinticolor? Quintachrome? Quintichrome? Quintic? Just... Quinta? That's apparently the name of a board game. Would be nice if it were a Q and exactly five letters. Quinth? Quinnt?
+// TODO: Fix mouse coordinates on scaled canvas in Firefox.
+// TODO: Fix bad mouse events vs page interaction on mobile.
+// TODO: Combine SFX into a single wav, use Howler's "audio sprites"
+// TODO: Add sound credits, maybe just in source file?
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Google Analytics on the page.
 
@@ -32,6 +25,8 @@
 // sfx:
 //		land: https://freesound.org/people/SuGu14/packs/5082
 //		break: https://freesound.org/people/sandyrb/sounds/148072/
+//		noise sweep: https://freesound.org/people/stair/sounds/387552/
+//		bass sweep: https://freesound.org/people/gellski/sounds/288879/
 
 const StateEnum = {
 	TITLE: -2,
@@ -41,9 +36,10 @@ const StateEnum = {
 	GAME_OVER: 2,
 };
 const KeyBindings = {
-	INCREASE_LEVEL: 32,
+	INCREASE_LEVEL: 90,
+	MUTE: 77,
 	PAUSE: 80,
-	QUAKE: 81,
+	QUAKE: 32,
 }
 
 // Gameplay constants.
@@ -60,7 +56,7 @@ const INITIAL_FALL_VELOCITY = .1;
 const LEVEL_RATE = 40 * 60; // 40 seconds
 const SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 const SPAWN_RATE_INCREMENT = .1;
-const SPAWN_RATE_INCREMENT_EXPONENT = .9;
+const SPAWN_RATE_INCREMENT_EXPONENT = .925;
 const MULTIPLIER_INCREMENT = .05;
 const MULTIPLIER_FORCE_INCREMENT = .12;
 const LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
@@ -69,6 +65,7 @@ const BOUNTY_POLYOMINOS = false;
 const QUAKE_METER = true;
 const QUAKE_METER_SIZE_INITIAL = 75;
 const QUAKE_METER_SIZE_INCREMENT = 25;
+const QUAKE_SPAWN_DELAY = 3 * 60; // 3 seconds
 const COMBO_DELAY = 3 * 60; // 3 seconds
 const COMBO_POINTS = 200;
 // Board appearance constants.
@@ -77,6 +74,8 @@ const FRONT_COLORS = ['#FF0000', '#20B0FF', '#F0D000', '#00D010', '#8040FF'];
 const SIDE_COLORS = ['#E50000', '#1EA0E5', '#D6BA00', '#00B80F', '#7339E5'];
 const BOTTOM_COLORS = ['#CC0000', '#1B8ECC', '#BDA400', '#009E0D', '#6633CC'];
 const BASE_COLOR = '#707090';
+const BASE_SIDE_COLOR = '#5B5B75';
+const BASE_BOTTOM_COLOR = '#48485C';
 const STROKE_WIDTH = PIECE_SIZE / 6;
 const BOARD_PADDING = PIECE_SIZE;
 const CONNECTION_APPEARANCE_RATE = .2;
@@ -94,13 +93,13 @@ const PERSPECTIVE_MAX_HEIGHT = .33;
 // Canvas setup.
 const canvas = document.getElementById('canvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
-canvas.height = BOARD_HEIGHT * PIECE_SIZE + 2 * BOARD_PADDING;
+canvas.height = BOARD_HEIGHT * PIECE_SIZE + BOARD_PADDING;
 const boardCanvas = document.createElement('canvas');
 boardCanvas.width = BOARD_WIDTH * PIECE_SIZE;
 boardCanvas.height = BOARD_HEIGHT * PIECE_SIZE;
-const boardCanvas2 = document.createElement('canvas');
-boardCanvas2.width = BOARD_WIDTH * PIECE_SIZE;
-boardCanvas2.height = BOARD_HEIGHT * PIECE_SIZE;
+const boardDesaturationCanvas = document.createElement('canvas');
+boardDesaturationCanvas.width = boardCanvas.width;
+boardDesaturationCanvas.height = boardCanvas.height;
 // UI constants.
 const UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
 const UI_TITLE_FADE_RATE = .025;
@@ -114,26 +113,27 @@ const UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 const UI_POLYOMINO_AREA_SIZE = PIECE_SIZE * 2.5;
 const UI_POLYOMINO_BLOCK_FILL = .8;
 const UI_GAME_OVER_FADE_TIME = 60;
-const UI_QUAKE_METER_WIDTH = PIECE_SIZE * 6;
-const UI_QUAKE_METER_HEIGHT = PIECE_SIZE / 6;
-const UI_QUAKE_METER_X = canvas.width / 3;
-const UI_QUAKE_METER_Y = canvas.height * .9;
-const UI_QUAKE_METER_STROKE = PIECE_SIZE / 20;
-const UI_QUAKE_METER_ATTRACT_X = UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2;
+const UI_QUAKE_METER_WIDTH_PERCENT = .9;
+const UI_QUAKE_METER_WIDTH = PIECE_SIZE * BOARD_WIDTH * .91;
+const UI_QUAKE_METER_HEIGHT = PIECE_SIZE * .5;
+const UI_QUAKE_METER_DEPTH = PIECE_SIZE;
+const UI_QUAKE_METER_X = BOARD_PADDING + PIECE_SIZE * BOARD_WIDTH / 2 - UI_QUAKE_METER_WIDTH / 2;
+const UI_QUAKE_METER_Y = canvas.height * .9425;
+const UI_QUAKE_METER_EMPTY_COLOR = '#8383A8';
+const UI_QUAKE_METER_FULL_COLOR = '#FAFAFF';
 const UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
-const UI_QUAKE_METER_SHAKE = UI_QUAKE_METER_HEIGHT / 5;
-const UI_QUAKE_METER_PRESHAKE = UI_QUAKE_METER_SHAKE / 2;
-const UI_QUAKE_METER_PRESHAKE_THRESHOLD = .8;
-const UI_QUAKE_TEXT_X = canvas.width / 2;
-const UI_QUAKE_TEXT_Y = canvas.height * .95;
 // Text constants.
-const TEXT_INSTRUCTIONS = ["There are " + COLORS.length + " colors of blocks.",
-						   "Draw a line through a block of each color.",
-						   "The line can't be longer than " + COLORS.length + " blocks.",
+const TEXT_INSTRUCTIONS = ["There are five colors of blocks.",
+						   "Draw a line through one block of each color.",
+						   "The line can't be more than five blocks long.",
 						   "Survive as long as you can!",
 						   "",
 						   "Click to begin."];
-const CREDITS = ["Quintacolor v 0.9.1",
+const TEXT_KEYS = ["Space: quake",
+				   "Z: increase level",
+				   "P: pause",
+				   "M: toggle mute"];
+const TEXT_CREDITS = ["Quintacolor v 0.9.5",
 			     "a game by Tom Quinn (thquinn.github.io)",
 			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
 			     "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
@@ -141,7 +141,7 @@ const CREDITS = ["Quintacolor v 0.9.1",
 // Background appearance.
 const BACKGROUND_COLOR = "#C3DCF0";
 const BACKGROUND_TILT = Math.PI * .05;
-const BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .0166)";
+const BACKGROUND_SQUIGGLE_COLOR = "rgba(0, 0, 255, .02)";
 const BACKGROUND_SQUIGGLE_SIZE = PIECE_SIZE * 5;
 // Effects appearance.
 const EFFECTS_VANISH_INIT_VELOCITY = PIECE_SIZE / 1000;
@@ -158,8 +158,9 @@ const EFFECTS_SPARKLE_HORIZONTAL_VELOCITY_RANGE = PIECE_SIZE / 35;
 const EFFECTS_SPARKLE_HORIZONTAL_DRAG = .99;
 const EFFECTS_SPARKLE_FADE_SPEED = .01;
 const EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS = PIECE_SIZE * 4;
-const EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 3;
-const EFFECTS_QUAKE_FADE_SPEED = .02;
+const EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 10;
+const EFFECTS_QUAKE_FADE_SPEED = .01;
+const EFFECTS_QUAKE_LIGHT_FADE_SPEED = .01;
 // Sound constants.
 const SFX_STING_MAX_VOL_PIECES = 12;
 const SFX_STING_RATE_FACTOR = .05;
@@ -168,25 +169,28 @@ const SFX_SCORE_REPETITION = 3;
 const ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
 const boardCtx = boardCanvas.getContext('2d');
-const boardCtx2 = boardCanvas2.getContext('2d');
+const boardDesaturationCtx = boardDesaturationCanvas.getContext('2d');
 // Asset setup.
 const ASSET_IMAGE_LOGO = document.createElement("img");
-ASSET_IMAGE_LOGO.src = "img/logo.png";
+ASSET_IMAGE_LOGO.src = "assets/logo.png";
 const ASSET_SFX_LAND = new Howl({
-  src: ['sfx/land.wav']
+  src: ['assets/land.wav']
 });
 const ASSET_SFX_BREAK = new Howl({
-  src: ['sfx/break.wav']
+  src: ['assets/break.wav']
 });
 const ASSET_SFX_STING = new Howl({
-  src: ['sfx/sting.wav']
+  src: ['assets/sting.wav']
 });
 const ASSET_SFX_SCORE = new Howl({
-  src: ['sfx/score.wav']
+  src: ['assets/score.wav']
+});
+const ASSET_SFX_QUAKE = new Howl({
+  src: ['assets/quake.wav']
 });
 
 // Initialize all game variables.
-let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboAppearance, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeScreenShake, sfxMap;
+let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeSpawnDelay, quakeScreenShake, quakeLightEffect, sfxMap;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
@@ -206,7 +210,6 @@ function start() {
 	scoreAppearance = 0;
 	scorePopup = 0;
 	combo = 0;
-	comboAppearance = 0;
 	comboDelay = 0;
 	bonusText = '';
 	bonusTimer = 0;
@@ -221,7 +224,9 @@ function start() {
 	quakeMeterSize = QUAKE_METER_SIZE_INITIAL;
 	quakeMeter = 0;
 	quakeMeterAppearance = 0;
+	quakeSpawnDelay = 0;
 	quakeScreenShake = 0;
+	quakeLightEffect = 0;
 	sfxMap = new Map();
 }
 
@@ -298,7 +303,7 @@ class Piece {
 			let fall = Math.min(this.dy, this.fallDistance, distanceToLowerNeighbor);
 			this.fallDistance -= fall;
 			if (this.fallDistance == 0) {
-				let vol = this.dy * .5;
+				let vol = this.dy * .75;
 				this.dy = 0;
 				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? .066 : vol);
 			}
@@ -423,13 +428,14 @@ class Piece {
 			nextPolyomino();
 		}
 		let quakeMeterFill = 0;
-		if (QUAKE_METER && this.root.children.size > 1) {
+		if (QUAKE_METER && quakeMeter < quakeMeterSize && this.root.children.size > 1) {
 			quakeMeterFill = this.root.children.size - 1;
 			quakeMeter = Math.min(quakeMeter + quakeMeterFill, quakeMeterSize);
 		}
 		for (let child of this.root.children) {
 			board[child.x][child.y] = null;
-			effects.vanish(child.x, child.y, quakeMeterFill / this.root.children.size);
+			var sparkles = !QUAKE_METER || this.root.children.size > 1;
+			effects.vanish(child.x, child.y, sparkles, quakeMeterFill / this.root.children.size);
 		}
 	}
 }
@@ -458,6 +464,11 @@ class Background {
 			squiggle.draw();
 		}
 		ctx.restore();
+		if (quakeLightEffect > 0) {
+			var alpha = quakeLightEffect * .25;
+			ctx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+		}
 	}
 }
 class Squiggle {
@@ -516,9 +527,9 @@ class Effects {
 		this.vanishes = [];
 		this.sparkles = [];
 	}
-	vanish(x, y, quakeMeterFill) {
+	vanish(x, y, sparkles, quakeMeterFill) {
 		this.vanishes.push(new Vanish(x, y));
-		if (!QUAKE_METER || quakeMeterFill > 0) {
+		if (sparkles) {
 			for (let i = 0; i < EFFECTS_SPARKLE_COUNT; i++) {
 				let sx = BOARD_PADDING + x * PIECE_SIZE + Math.random() * PIECE_SIZE;
 				let sy = y * PIECE_SIZE + Math.random() * PIECE_SIZE;
@@ -594,11 +605,12 @@ class Sparkle {
 		this.y += this.dy;
 		this.dx *= EFFECTS_SPARKLE_HORIZONTAL_DRAG;
 		this.alpha = Math.max(0, this.alpha - EFFECTS_SPARKLE_FADE_SPEED);
-		if (QUAKE_METER && quakeMeterAppearance < quakeMeterSize) {
+		if (QUAKE_METER && this.quakeMeterFill > 0) {
+			let attractX = UI_QUAKE_METER_X + (quakeMeterAppearance / quakeMeterSize) * UI_QUAKE_METER_WIDTH;
 			let attract = Math.pow(1 - this.alpha, 4);
-			this.x = UI_QUAKE_METER_ATTRACT_X * attract + this.x * (1 - attract);
+			this.x = attractX * attract + this.x * (1 - attract);
 			this.y = UI_QUAKE_METER_ATTRACT_Y * attract * 2 + this.y * (1 - attract * 2);
-			let hypot = Math.hypot(this.x - UI_QUAKE_METER_ATTRACT_X, this.y - UI_QUAKE_METER_ATTRACT_Y);
+			let hypot = Math.hypot(this.x - attractX, this.y - UI_QUAKE_METER_ATTRACT_Y);
 			let closeAlpha = hypot < EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS ? (hypot / EFFECTS_SPARKLE_ATTRACTION_FADE_RADIUS) : 1;
 			this.alpha = Math.min(this.alpha, closeAlpha);
 		} else {
@@ -618,7 +630,6 @@ function loop() {
 	window.requestAnimationFrame(loop);
 	background.update();
 	background.draw();
-	boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
 
 	// Setup.
 	if (state == StateEnum.SETUP) {
@@ -646,6 +657,11 @@ function loop() {
 		ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
 		keysPressed.clear();
 		return;
+	}
+
+	// Mute check.
+	if (keysPressed.has(KeyBindings.MUTE)) {
+		localStorage.mute = localStorage.mute == 'true' ? 'false' : 'true';
 	}
 
 	// Game over check.
@@ -728,12 +744,15 @@ function loop() {
 				let rate = SPAWN_RATE_INITIAL + Math.pow((level - 1) * SPAWN_RATE_INCREMENT, SPAWN_RATE_INCREMENT_EXPONENT);
 				spawnTimer += 60 / rate;
 			}
+		} else if (quakeSpawnDelay > 0) {
+			quakeSpawnDelay--;
 		} else {
 			spawnTimer--;
 		}
 	}
 	
 	// Draw pieces.
+	boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
 	for (let x = 0; x < BOARD_WIDTH; x++) {
 		let pingpongX = x % 2 == 0 ? x / 2 : BOARD_WIDTH - (x + 1) / 2;
 		for (let y = 0; y < BOARD_HEIGHT; y++) {
@@ -743,26 +762,25 @@ function loop() {
 			board[pingpongX][y].draw();
 		}
 	}
-	// Create board mask.
-	boardCtx2.clearRect(0, 0, boardCanvas2.width, boardCanvas2.height);
-	boardCtx2.drawImage(boardCanvas, 0, 0);
-	// Draw desaturation overlay.
+	// Draw board.
 	if (state == StateEnum.GAME_OVER) {
+		// Create board mask.
+		boardDesaturationCtx.clearRect(0, 0, boardDesaturationCanvas.width, boardDesaturationCanvas.height);
+		boardDesaturationCtx.drawImage(boardCanvas, 0, 0);
+		// Desaturate.
 		let alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
 		boardCtx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
 		boardCtx.globalCompositeOperation = 'saturation';
 		boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+		// Apply board mask.
+		boardCtx.globalCompositeOperation = 'destination-in';
+		boardCtx.drawImage(boardDesaturationCanvas, 0, 0);
 		boardCtx.globalCompositeOperation = 'source-over';
 	}
-	// Use board mask to draw board.
-	boardCtx2.globalCompositeOperation = 'source-in';
-	boardCtx2.drawImage(boardCanvas, 0, 0);
-	boardCtx2.globalCompositeOperation = 'source-over';
-	// Draw board.
 	let screenShakeX = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
 	let screenShakeY = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
 	quakeScreenShake = Math.max(0, quakeScreenShake - EFFECTS_QUAKE_FADE_SPEED);
-	ctx.drawImage(boardCanvas2, BOARD_PADDING + screenShakeX, screenShakeY);
+	ctx.drawImage(boardCanvas, BOARD_PADDING + screenShakeX, screenShakeY);
 	// Draw base.
 	let baseY = BOARD_HEIGHT * PIECE_SIZE;
 	ctx.fillStyle = BASE_COLOR;
@@ -812,8 +830,8 @@ function loop() {
 	}
 	if (bonusTimer > 0) {
 		ctx.fillStyle = (clock % (UI_BONUS_FLASH_FRAMES * 2)) < UI_BONUS_FLASH_FRAMES ? "#FFFFFF": "#E9E9F9";
-		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .5935);	
+		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .6);	
 	}
 	let levelPercent = levelTimer / LEVEL_RATE;
 	let levelX = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS, levelY = canvas.height * .4125;
@@ -834,42 +852,49 @@ function loop() {
 		drawPolyominoUI();
 	}
 	if (QUAKE_METER) {
-		ctx.fillStyle = "#9090F0";
-		let offsetX = 0, offsetY = 0;
-		if (quakeMeter >= quakeMeterSize) {
-			offsetX = Math.randFloat(-1, 1) * UI_QUAKE_METER_SHAKE;
-			offsetY = Math.randFloat(-1, 1) * UI_QUAKE_METER_SHAKE;
-			ctx.textAlign= 'right';
-			ctx.textBaseline = 'top';
-			ctx.font = (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-			ctx.fillText("uake ready!", UI_QUAKE_TEXT_X + offsetX, UI_QUAKE_TEXT_Y + offsetY);
-			let quakeWidth = ctx.measureText("uake ready!").width;
-			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-			ctx.fillText("Q", UI_QUAKE_TEXT_X - quakeWidth + offsetX, UI_QUAKE_TEXT_Y + offsetY);
-		} else if (quakeMeterAppearance >= quakeMeterSize * UI_QUAKE_METER_PRESHAKE_THRESHOLD) {
-			let scale = 1 - (quakeMeterSize - quakeMeterAppearance) / (quakeMeterSize * (1 - UI_QUAKE_METER_PRESHAKE_THRESHOLD));
-			offsetX = Math.randFloat(-1, 1) * UI_QUAKE_METER_PRESHAKE * scale;
-			offsetY = Math.randFloat(-1, 1) * UI_QUAKE_METER_PRESHAKE * scale;
-		}
-		let quakeMeterFillPercent = quakeMeterAppearance / quakeMeterSize;
-		ctx.fillRect(UI_QUAKE_METER_X + UI_QUAKE_METER_STROKE / 2 + offsetX, UI_QUAKE_METER_Y + offsetY, (UI_QUAKE_METER_WIDTH - UI_QUAKE_METER_STROKE) * quakeMeterFillPercent, UI_QUAKE_METER_HEIGHT);
-		ctx.lineWidth = UI_QUAKE_METER_STROKE;
-		ctx.strokeStyle = "#FFFFFF";
+		ctx.fillStyle = UI_QUAKE_METER_EMPTY_COLOR;
+		ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH, UI_QUAKE_METER_HEIGHT);
+		let p = perspective(BOARD_WIDTH * (1 - UI_QUAKE_METER_WIDTH_PERCENT) / 2, (UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) / PIECE_SIZE);
+		p[1] = Math.abs(p[1]);
+		ctx.fillStyle = BASE_SIDE_COLOR;
 		ctx.beginPath();
-		ctx.arc(UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH - UI_QUAKE_METER_HEIGHT / 2 + offsetX,
-				UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2 + offsetY,
-				UI_QUAKE_METER_HEIGHT / 2,
-				1.5 * Math.PI,
-				0.5 * Math.PI,
-				false);
-		ctx.arc(UI_QUAKE_METER_X + UI_QUAKE_METER_HEIGHT / 2 + offsetX,
-				UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2 + offsetY,
-				UI_QUAKE_METER_HEIGHT / 2,
-				0.5 * Math.PI,
-				1.5 * Math.PI,
-				false);
+		ctx.moveTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
 		ctx.closePath();
-		ctx.stroke();
+		ctx.fill();
+		ctx.beginPath();
+		ctx.moveTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+		ctx.closePath();
+		ctx.fill();
+		ctx.fillStyle = BASE_BOTTOM_COLOR;
+		ctx.beginPath();
+		ctx.moveTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+		ctx.closePath();
+		ctx.fill();
+		let fillPercent = quakeMeterAppearance / quakeMeterSize;
+		if (fillPercent > 0) {
+			ctx.fillStyle = UI_QUAKE_METER_FULL_COLOR;
+			ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * fillPercent, UI_QUAKE_METER_HEIGHT);
+			let glow = PIECE_SIZE * (quakeMeter == quakeMeterSize ? Math.sin(clock / 25) * .05 + .1 : .04);
+			ctx.filter = 'blur(' + glow + 'px)';
+			ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * (quakeMeterAppearance / quakeMeterSize), UI_QUAKE_METER_HEIGHT);
+			ctx.filter = 'none';
+		}
+		if (quakeMeter == quakeMeterSize) {
+			ctx.textAlign = 'center';
+			ctx.textBaseline = 'middle';
+			ctx.fillStyle = '#DFDFFF';
+			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 4) + "px Source Sans Pro";
+			ctx.fillText('click here or press SPACE to settle the board', UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH / 2, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2);
+		}
 	}
 	if (state == StateEnum.GAME_OVER) {
 		ctx.textAlign= 'right';
@@ -883,6 +908,24 @@ function loop() {
 		ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
 		ctx.textAlign= 'left';
 		ctx.fillText("your high score: " + parseInt(localStorage.highScore).toLocaleString(), canvas.width - BOARD_PADDING - gameOverWidth, canvas.height - BOARD_PADDING);
+	}
+	// Draw quake light effect.
+	if (quakeLightEffect > 0) {
+		// Fullscreen flash.
+		let fullscreenAlpha = Math.max(0, (quakeLightEffect - .75) * 4);
+		if (fullscreenAlpha > 0) {
+			ctx.fillStyle = "rgba(255, 255, 255, " + fullscreenAlpha + ")";
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+		}
+		// Gradient.
+		var gradient = ctx.createLinearGradient(0, canvas.height, 0, 0);
+		var gradientAlpha = quakeLightEffect * (clock % 2 == 0 ? 1.25 : 1);
+		gradient.addColorStop(0, 'rgba(255,255,255, ' + gradientAlpha + ')');
+		gradient.addColorStop(1, 'rgba(255,255,255,0)');
+		ctx.fillStyle = gradient;
+		ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY, UI_QUAKE_METER_WIDTH, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+		// Diminish.
+		quakeLightEffect = Math.max(0, quakeLightEffect - EFFECTS_QUAKE_LIGHT_FADE_SPEED);
 	}
 	// Draw effects.
 	effects.update();
@@ -906,13 +949,18 @@ function loop() {
 		for (let i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
 			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
 		}
-		ctx.textAlign ='right';
 		ctx.textBaseline = 'alphabetic';
 		ctx.fillStyle = "rgba(128, 128, 128, " + titleFade + ")";
 		ctx.font = (UI_SCORE_FONT_SIZE / 6) + "px Source Sans Pro";
-		for (let i = 0; i < CREDITS.length; i++) {
-			let creditY = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (CREDITS.length - i - 1);
-			ctx.fillText(CREDITS[i], canvas.width - BOARD_PADDING / 2, creditY);
+		ctx.textAlign ='left';
+		for (let i = 0; i < TEXT_KEYS.length; i++) {
+			let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_KEYS.length - i - 1);
+			ctx.fillText(TEXT_KEYS[i], BOARD_PADDING / 2, y);
+		}
+		ctx.textAlign ='right';
+		for (let i = 0; i < TEXT_CREDITS.length; i++) {
+			let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_CREDITS.length - i - 1);
+			ctx.fillText(TEXT_CREDITS[i], canvas.width - BOARD_PADDING / 2, y);
 		}
 	}
 
@@ -961,8 +1009,7 @@ function mouseDownHelper(x, y, rightClick) {
 		selected = [];
 		return;
 	}
-	let quakeTextWidth = UI_SCORE_FONT_SIZE * 3, quakeTextHeight = UI_SCORE_FONT_SIZE / 2;
-	if (x >= UI_QUAKE_TEXT_X - quakeTextWidth && x <= UI_QUAKE_TEXT_X && y >= UI_QUAKE_TEXT_Y && y <= UI_QUAKE_TEXT_Y + quakeTextHeight) {
+	if (x >= UI_QUAKE_METER_X && x <= UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH && y >= UI_QUAKE_METER_Y && y <= UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) {
 		keysPressed.add(KeyBindings.QUAKE);
 		return;
 	}
@@ -1002,11 +1049,11 @@ function mouseUpHelper() {
 	if (state != StateEnum.RUNNING) {
 		return;
 	}
-	let colorCheck = new Set(new Array(COLORS.length).keys());
+	let colorCheck = new Set();
 	for (let i = 0; i < selected.length; i++) {
-		colorCheck.delete(board[selected[i][0]][selected[i][1]].color)
+		colorCheck.add(board[selected[i][0]][selected[i][1]].color);
 	}
-	if (colorCheck.size == 0) {
+	if (colorCheck.size == COLORS.length) {
 		let toDestroy = new Set();
 		let piecesDestroyed = 0;
 		for (let i = 0; i < selected.length; i++) {
@@ -1149,22 +1196,21 @@ function fallCheck() {
 	}
 }
 
-function scorePoints(points, increaseCombo = true) {
-	if (increaseCombo && combo >= 1) {
-		let comboPoints = Math.round(200 * combo * multiplier);
-		points += comboPoints;
-		bonusText = (combo + 1) + "X COMBO +" + comboPoints;
-		bonusTimer = UI_BONUS_TIMER;
+function scorePoints(points, match = true) {
+	if (match) {
+		combo++;
+		if (combo >= 2) {
+			let comboPoints = Math.round(200 * (combo - 1) * multiplier);
+			points += comboPoints;
+			bonusText = combo + " QUICK MATCHES! +" + comboPoints;
+			bonusTimer = UI_BONUS_TIMER;
+		}
 	}
 	score += points;
 	if (scorePopup > 0 && comboDelay == 0) {
 		scoreAppearance += scorePopup;
 		scorePopup = points;
 	} else {
-		if (increaseCombo && combo == 0 || comboDelay > 0) {
-			combo++;
-			comboAppearance = combo;
-		}
 		scorePopup += points;
 	}
 	comboDelay = COMBO_DELAY;
@@ -1189,6 +1235,9 @@ function perspective(x, y) {
 }
 
 function playSFX(sfx, volume) {
+	if (localStorage.mute == 'true') {
+		return;
+	}
 	if (!sfxMap.has(sfx)) {
 		sfxMap.set(sfx, volume);
 	} else {
@@ -1267,7 +1316,12 @@ function quake() {
 		}
 	}
 	fallCheck();
+	quakeSpawnDelay = QUAKE_SPAWN_DELAY;
 	quakeScreenShake = 1;
+	quakeLightEffect = 1;
+	ASSET_SFX_QUAKE.rate(2);
+	ASSET_SFX_QUAKE.volume(.33);
+	ASSET_SFX_QUAKE.play();
 }
 
 start();
