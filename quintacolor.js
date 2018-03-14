@@ -172,21 +172,21 @@ const boardCtx = boardCanvas.getContext('2d');
 const boardDesaturationCtx = boardDesaturationCanvas.getContext('2d');
 // Asset setup.
 const ASSET_IMAGE_LOGO = document.createElement("img");
-ASSET_IMAGE_LOGO.src = "assets/logo.png";
+ASSET_IMAGE_LOGO.src = "quintacolor_assets/logo.png";
 const ASSET_SFX_LAND = new Howl({
-  src: ['assets/land.wav']
+  src: ['quintacolor_assets/land.wav']
 });
 const ASSET_SFX_BREAK = new Howl({
-  src: ['assets/break.wav']
+  src: ['quintacolor_assets/break.wav']
 });
 const ASSET_SFX_STING = new Howl({
-  src: ['assets/sting.wav']
+  src: ['quintacolor_assets/sting.wav']
 });
 const ASSET_SFX_SCORE = new Howl({
-  src: ['assets/score.wav']
+  src: ['quintacolor_assets/score.wav']
 });
 const ASSET_SFX_QUAKE = new Howl({
-  src: ['assets/quake.wav']
+  src: ['quintacolor_assets/quake.wav']
 });
 
 // Initialize all game variables.
@@ -1320,7 +1320,7 @@ function quake() {
 	quakeScreenShake = 1;
 	quakeLightEffect = 1;
 	ASSET_SFX_QUAKE.rate(2);
-	ASSET_SFX_QUAKE.volume(.33);
+	ASSET_SFX_QUAKE.volume(.25);
 	ASSET_SFX_QUAKE.play();
 }
 
