@@ -1,4 +1,4 @@
-// TODO: Music
+// TODO: Music! Use howler's preload.
 // TODO: Final polish!
 // 		Improve the vanishes for the new 3D look. A buncha triangles?
 //		More on-screen buttons. Mute SFX, mute music, pause.
@@ -11,23 +11,17 @@
 // TODO: A speeder, replacing forced level increase? People are still having to wait for pieces, and the 12% over the 5% isn't that viscerally fun.
 // TODO: Drawing optimizations
 //		Try to rid of the second board canvas which seems necessary because the saturation blend mode is changing the alpha channel.
+// TODO: Still seeing some performance issues later in the game.
 // TODO: Move logic from mouse events to the main thread
 // TODO: Fix connections still breaking while falling side by side.
-// TODO: Show an example path if X seconds pass without the player getting points?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
-// TODO: Add sound credits, maybe just in source file?
+// TODO: Add sound credit
 // TODO: findRandomMatch is creating an occasional caught type error.
 // TODO: Cram util.js up here, load the font here, and wait until it's loaded to show anything.
 // TODO: Google Analytics on the page.
 
 // KNOWN BUG: Text alignment is messed up in Firefox. Could maybe be fixed by using different baselines.
-
-// sfx:
-//		land: https://freesound.org/people/SuGu14/packs/5082
-//		break: https://freesound.org/people/sandyrb/sounds/148072/
-//		noise sweep: https://freesound.org/people/stair/sounds/387552/
-//		bass sweep: https://freesound.org/people/gellski/sounds/288879/
 
 const StateEnum = {
 	TITLE: -2,
@@ -65,7 +59,7 @@ const CONNECTION_RATE = .015;
 const BOUNTY_POLYOMINOS = false;
 const QUAKE_METER = true;
 const QUAKE_METER_SIZE_INITIAL = 75;
-const QUAKE_METER_SIZE_INCREMENT = 25;
+const QUAKE_METER_SIZE_INCREMENT = 20;
 const QUAKE_SPAWN_DELAY = 3 * 60; // 3 seconds
 const COMBO_DELAY = 3 * 60; // 3 seconds
 const COMBO_POINTS = 200;
@@ -165,9 +159,14 @@ const EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 10;
 const EFFECTS_QUAKE_FADE_SPEED = .01;
 const EFFECTS_QUAKE_LIGHT_FADE_SPEED = .01;
 // Sound constants.
+const SFX_LAND_VOLUME_MULTIPLIER = .75;
+const SFX_LAND_SETUP_VOLUME = .066;
+const SFX_BREAK_VOLUME = .2;
 const SFX_STING_MAX_VOL_PIECES = 12;
 const SFX_STING_RATE_FACTOR = .05;
+const SFX_SCORE_VOLUME = .05;
 const SFX_SCORE_REPETITION = 3;
+const SFX_QUAKE_VOLUME = .25;
 // 2D HTML5 context setup.
 const ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
@@ -308,9 +307,9 @@ class Piece {
 			let fall = Math.min(this.dy, this.fallDistance, distanceToLowerNeighbor);
 			this.fallDistance -= fall;
 			if (this.fallDistance == 0) {
-				let vol = this.dy * .75;
+				let vol = this.dy * SFX_LAND_VOLUME_MULTIPLIER;
 				this.dy = 0;
-				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? .066 : vol);
+				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? SFX_LAND_SETUP_VOLUME : vol);
 			}
 		} else {
 			this.dy = 0;
@@ -723,7 +722,7 @@ function loop() {
 			scorePopup -= drainAmount;
 			scoreAppearance += drainAmount;
 			if (clock % SFX_SCORE_REPETITION == 0) {
-				playSFX(ASSET_SFX_SCORE, .05);
+				playSFX(ASSET_SFX_SCORE, SFX_SCORE_VOLUME);
 			}
 		}
 	}
@@ -1089,7 +1088,7 @@ function mouseUpHelper() {
 		}
 		scorePoints(Math.round(piecesDestroyed * 100 * multiplier));
 		// Play sound effects.
-		playSFX(ASSET_SFX_BREAK, .2);
+		playSFX(ASSET_SFX_BREAK, SFX_BREAK_VOLUME);
 		let stingStrength = (piecesDestroyed - COLORS.length) / SFX_STING_MAX_VOL_PIECES;
 		if (piecesDestroyed > SFX_STING_MAX_VOL_PIECES) {
 			ASSET_SFX_STING.rate(1 + .1 * (piecesDestroyed - SFX_STING_MAX_VOL_PIECES));
@@ -1346,7 +1345,7 @@ function quake() {
 	quakeSpawnDelay = QUAKE_SPAWN_DELAY;
 	quakeScreenShake = 1;
 	quakeLightEffect = 1;
-	playSFX(ASSET_SFX_QUAKE, .25);
+	playSFX(ASSET_SFX_QUAKE, SFX_QUAKE_VOLUME);
 }
 
 start();
