@@ -55,6 +55,12 @@ Array.containsArray = function (a, b) {
   }
   return -1;
 }
+Array.prototype.max = function() {
+  return Math.max.apply(null, this);
+};
+Array.prototype.min = function() {
+  return Math.min.apply(null, this);
+};
 
 function mousePos(el, e) {
   let xPosition = 0;
@@ -107,7 +113,7 @@ function findRandomMatch(board, n) {
         let last = match[match.length - 1];
         let nx = last[0] + NEIGHBORS[i][0];
         let ny = last[1] + NEIGHBORS[i][1];
-        if (nx < 0 || nx > board.length || ny < 0 || ny > board[0].length || board[nx][ny] == null || colors.has(board[nx][ny].color)) {
+        if (nx < 0 || nx >= board.length || ny < 0 || ny > board[0].length || board[nx][ny] == null || colors.has(board[nx][ny].color)) {
           continue;
         }
         success = true;
