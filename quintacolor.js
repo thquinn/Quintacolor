@@ -3,8 +3,7 @@
 //		Put in the final sound and music. Use howler's preload.
 //		Final pass on fonts
 //		Call it something other than "settling the board."
-// TODO: Formally define path backout behavior for last piece. Mousing over any piece adjacent to the second to last should shift. Now it's just horiz->vertical?
-// TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! It's before we make any blur calls.
+// TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls
 // TODO: Queue up path SFX instead of playing multiple in the same frame. Maybe 2-3 frames between?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
@@ -41,7 +40,7 @@ const GRAVITY = .005;
 const INITIAL_FALL_VELOCITY = .1;
 const LEVEL_RATE = 40 * 60; // increase the level every 40 seconds
 const SPAWN_RATE_INITIAL = .75; // pieces spawned per second
-const SPAWN_RATE_INCREMENT = .11; // pieces spawned per second per level
+const SPAWN_RATE_INCREMENT = .115; // pieces spawned per second per level
 const SPAWN_RATE_INCREMENT_EXPONENT = .925; // difficulty falloff, lower is easier in the later levels
 const SPAWN_RATE_SCALE_WITH_VACANCY = true; // spawn more pieces the emptier the board is
 const SPAWN_RATE_SCALING_MAX = 5; // multiply the spawn rate by this if the board is completely empty, lerp from half full
@@ -1230,28 +1229,37 @@ function selectCheck(x, y) {
 	}
 	let coor = selected[selected.length - 1].slice();
 	let dx = x - coor[0];
-	dx /= Math.abs(dx);
-	while (coor[0] != x && coor[0] + dx >= 0 && coor[0] + dx < BOARD_WIDTH && board[coor[0] + dx][coor[1]] != null && board[coor[0] + dx][coor[1]].fallDistance == 0) {
-		coor[0] += dx;
-		selectCheckHelper(coor[0], coor[1]);
+	if (dx != 0) {
+		dx /= Math.abs(dx);
 	}
 	let dy = y - coor[1];
-	dy /= Math.abs(dy);
-	while (coor[1] != y && coor[1] + dy >= 0 && coor[1] + dy < BOARD_HEIGHT && board[coor[0]][coor[1] + dy] != null && board[coor[0]][coor[1] + dy].fallDistance == 0) {
-		coor[1] += dy;
-		selectCheckHelper(coor[0], coor[1]);
+	if (dy != 0) {
+		dy /= Math.abs(dy);
 	}
-	// Repeat earlier while to cover scenarios where the path must go vertically then horizontally.
-	while (coor[0] != x && coor[0] + dx >= 0 && coor[0] + dx < BOARD_WIDTH && board[coor[0] + dx][coor[1]] != null && board[coor[0] + dx][coor[1]].fallDistance == 0) {
-		coor[0] += dx;
-		selectCheckHelper(coor[0], coor[1]);
+	while (true) {
+		let changed = false;
+		if (selectCheckHelper(coor[0] + dx, coor[1])) {
+			coor[0] += dx;
+			if (coor[0] == x) {
+				dx = 0;
+			}
+			changed = true;
+		}
+		if (selectCheckHelper(coor[0], coor[1] + dy)) {
+			coor[1] += dy;
+			if (coor[1] == y) {
+				dy = 0;
+			}
+			changed = true;
+		}
+		if (!changed) {
+			break;
+		}
 	}
 }
 function selectCheckHelper(x, y) {
-	if (x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT)
-		return;
-	if (board[x][y] == null || board[x][y].fallDistance > 0) {
-		return;
+	if (x < 0 || y < 0 || x >= BOARD_WIDTH || y >= BOARD_HEIGHT || board[x][y] == null || board[x][y].fallDistance > 0) {
+		return false;
 	}
 	let coor = [x, y];
 	let i = Array.containsArray(selected, coor);
@@ -1261,16 +1269,16 @@ function selectCheckHelper(x, y) {
 		if (!pathHasDuplicateColor()) {
 			sfxPathError = false;
 		}
-		return;
+		return true;
 	}
 	if (selected.length == COLORS.length) {
-		return;
+		return false;
 	}
 	if (selected.length > 0) {
 		let last = selected[selected.length - 1];
 		let d = Math.abs(last[0] - x) + Math.abs(last[1] - y);
 		if (d != 1) {
-			return;
+			return false;
 		}
 	}
 	selected.push([x, y]);
@@ -1283,6 +1291,7 @@ function selectCheckHelper(x, y) {
 		let pathSounds = comboDelay > 0 ? ASSET_SFX_PATH_COMBOS : ASSET_SFX_PATHS;
 		playSFX(pathSounds[selected.length - 1], SFX_PATH_VOLUME);
 	}
+	return true;
 }
 
 function fallCheck() {
