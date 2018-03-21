@@ -41,9 +41,6 @@ Array.equal = function (a, b) {
   if (a == null || b == null) return false;
   if (a.length != b.length) return false;
 
-  // If you don't care about the order of the elements inside
-  // the array, you should sort both arrays here.
-
   for (let i = 0; i < a.length; ++i) {
     if (a[i] !== b[i]) return false;
   }
@@ -113,7 +110,7 @@ function findRandomMatch(board, n) {
         let last = match[match.length - 1];
         let nx = last[0] + NEIGHBORS[i][0];
         let ny = last[1] + NEIGHBORS[i][1];
-        if (nx < 0 || nx >= board.length || ny < 0 || ny > board[0].length || board[nx][ny] == null || colors.has(board[nx][ny].color)) {
+        if (nx < 0 || nx >= board.length || ny < 0 || ny > board[0].length || board[nx][ny] == null || colors.has(board[nx][ny].color) || board[nx][ny].fallDistance > 0) {
           continue;
         }
         success = true;

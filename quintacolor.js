@@ -1,18 +1,14 @@
-// TODO: Music! Use howler's preload.
 // TODO: Final polish!
 // 		Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
-//		Better sound effects.
-//			Redo the mixing for multiple plays.
-//			Current sting specific to combos, align playback rate to chromatic scale ascending.
-//			A new effect for large piece destruction.
-//		Do another pass on colors, including text.
+//		Put in the final sound and music. Use howler's preload.
+//		Final pass on fonts
 //		Call it something other than "settling the board."
-// TODO: Fix connections still breaking while falling side by side.
-// TODO: Move logic from mouse events to the main thread
+// TODO: Formally define path backout behavior for last piece. Mousing over any piece adjacent to the second to last should shift. Now it's just horiz->vertical?
+// TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! It's before we make any blur calls.
+// TODO: Queue up path SFX instead of playing multiple in the same frame. Maybe 2-3 frames between?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
-// TODO: Add sound credit
-// TODO: Wait for assets to load
+// TODO: Wait for assets to load? Depends on load time.
 // TODO: Turn debug mode off
 // TODO: Minify
 // TODO: Back to Rawgit
@@ -37,31 +33,33 @@ const KeyBindings = {
 const COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 const BOARD_WIDTH = 15;
 const BOARD_HEIGHT = 12;
-const SETUP_ROWS = 6;
-const SETUP_NO_CONNECTIONS = true;
-const COLUMN_SELECTION_CHANCE_TO_WEIGHT = 1;
-const COLOR_SELECTION_CHANCE_TO_WEIGHT = .66;
+const SETUP_ROWS = 6; // number of rows filled at the start of the game
+const SETUP_NO_CONNECTIONS = true; // guarantee that no two adjacent setup row pieces will be the same color
+const COLUMN_SELECTION_CHANCE_TO_WEIGHT = .8; // chance that we weight towards dropping pieces in emptier columns
+const COLOR_SELECTION_CHANCE_TO_WEIGHT = .66; // chance that we weight towards colors absent from the board
 const GRAVITY = .005;
 const INITIAL_FALL_VELOCITY = .1;
-const LEVEL_RATE = 40 * 60; // 40 seconds
+const LEVEL_RATE = 40 * 60; // increase the level every 40 seconds
 const SPAWN_RATE_INITIAL = .75; // pieces spawned per second
-const SPAWN_RATE_INCREMENT = .12;
-const SPAWN_RATE_INCREMENT_EXPONENT = .925;
-const SPAWN_RATE_SCALE_WITH_VACANCY = true;
-const MULTIPLIER_INCREMENT = .05;
-const MULTIPLIER_FORCE_INCREMENT = .1;
-const ALLOW_INCREASE_LEVEL = true;
-const LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // 1.5 seconds
-const CONNECTION_RATE = .015;
-const BOUNTY_POLYOMINOS = false;
-const QUAKE_METER = true;
-const QUAKE_METER_SIZE_INITIAL = 75;
-const QUAKE_METER_SIZE_INCREMENT = 20;
-const QUAKE_SPAWN_DELAY = 6 * 60; // 6 seconds
-const QUAKE_ALLOW_WITHOUT_SETTLE = true;
-const COMBO_DELAY = 3 * 60; // 3 seconds
-const COMBO_POINTS = 200;
-const DEBUG_MODE = false;
+const SPAWN_RATE_INCREMENT = .11; // pieces spawned per second per level
+const SPAWN_RATE_INCREMENT_EXPONENT = .925; // difficulty falloff, lower is easier in the later levels
+const SPAWN_RATE_SCALE_WITH_VACANCY = true; // spawn more pieces the emptier the board is
+const SPAWN_RATE_SCALING_MAX = 5; // multiply the spawn rate by this if the board is completely empty, lerp from half full
+const MULTIPLIER_INCREMENT = .05; // increase the multiplier by this much when the level increases naturally
+const ALLOW_INCREASE_LEVEL = false; // allow the player to manually increase the level
+const MULTIPLIER_FORCE_INCREMENT = .1; // increase the multiplier by this much when the level is increased manually
+const LEVEL_UP_FORCE_COOLDOWN = 1.5 * 60; // force the player to wait this long after manually increasing level to do it again
+const CONNECTION_RATE = .015; // Adjacent same-color pieces make 1.5% progress towards being connected every frame
+const BOUNTY_POLYOMINOS = false; // (deprecated) Choose random polyominos and reward the player when a piece of that shape is matched
+const QUAKE_METER = true; // Enables the "super meter" that settles the board and pauses piece spawn for a time when filled and used
+const QUAKE_METER_SIZE_INITIAL = 75; // The number of piece connections it takes to fill the first meter
+const QUAKE_METER_SIZE_INCREMENT = 20; // The amount the size of the meter increases each time it's used
+const QUAKE_SPAWN_DELAY = 6 * 60; // Pieces stop spawning for 6 seconds when quake is used
+const QUAKE_ALLOW_WITHOUT_SETTLE = true; // If false, prevents the player from using quake if the board is already settled
+const COMBO_DELAY = 3 * 60; // Players have 3 seconds after making a match to make another and earn a point bonus
+const COMBO_FUDGE_FACTOR = .2; // The combo timer ticks down up to 20% slower depending on how many valid pieces are selected.
+const COMBO_POINTS = 200; // Number of points earned for quick matches, multiplied by the number of quick matches in a row
+const DEBUG_MODE = true; // If enabled, the player can activate quake with an empty meter to fill the meter.
 // Board appearance constants.
 const PIECE_SIZE = 60;
 const BOARD_3D = true;
@@ -74,6 +72,8 @@ const BOTTOM_COLORS = ['#CC0000', '#1B8ECC', '#BDA400', '#009E0D', '#6633CC'];
 const BASE_COLOR = '#818FA2';
 const BASE_SIDE_COLOR = '#6E7A8A';
 const BASE_BOTTOM_COLOR = '#5A6370';
+const UI_QUAKE_METER_EMPTY_COLOR = '#97A7BD';
+const UI_QUAKE_METER_FULL_COLOR = '#FAFCFF';
 const STROKE_WIDTH = PIECE_SIZE / 6;
 const BOARD_PADDING = PIECE_SIZE;
 const CONNECTION_APPEARANCE_RATE = .2;
@@ -97,11 +97,12 @@ boardDesaturationCanvas.height = boardCanvas.height;
 // UI constants.
 const UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
 const UI_TITLE_FADE_RATE = .025;
+const UI_TEXT_COLOR = "#76a1d9";
 const UI_SCORE_DIGITS = 10;
 const UI_SCORE_FONT_SIZE = UI_WIDTH / UI_SCORE_DIGITS * 1.75;
 const UI_SCORE_POPUP_DRAIN_PERCENT = .04;
 const UI_SCORE_POPUP_DRAIN_MIN = 11;
-const UI_BONUS_TIMER = 3 * 60; // 3 seconds
+const UI_BONUS_TIMER = COMBO_DELAY;
 const UI_BONUS_FLASH_FRAMES = 3;
 const UI_LEVEL_CIRCLE_RADIUS = PIECE_SIZE * .66;
 const UI_LEVEL_CIRCLE_X = canvas.width - BOARD_PADDING - UI_LEVEL_CIRCLE_RADIUS;
@@ -115,13 +116,12 @@ const UI_QUAKE_METER_HEIGHT = PIECE_SIZE * .5;
 const UI_QUAKE_METER_DEPTH = PIECE_SIZE;
 const UI_QUAKE_METER_X = BOARD_PADDING + PIECE_SIZE * BOARD_WIDTH / 2 - UI_QUAKE_METER_WIDTH / 2;
 const UI_QUAKE_METER_Y = canvas.height * .9425;
-const UI_QUAKE_METER_EMPTY_COLOR = '#97A7BD';
-const UI_QUAKE_METER_FULL_COLOR = '#FAFAFF';
 const UI_QUAKE_METER_ATTRACT_Y = UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2;
 const UI_EXAMPLE_MATCH_DELAY = 10 * 60; // 10 seconds
-const UI_MUTE_BUTTON_RADIUS = PIECE_SIZE / 3;
-const UI_MUTE_BUTTON_X = canvas.width - BOARD_PADDING / 5 - UI_MUTE_BUTTON_RADIUS;
-const UI_MUTE_BUTTON_Y = BOARD_PADDING / 5 + UI_MUTE_BUTTON_RADIUS;
+const UI_TOP_BUTTON_RADIUS = PIECE_SIZE / 3;
+const UI_PAUSE_BUTTON_X = canvas.width - BOARD_PADDING / 5 - UI_TOP_BUTTON_RADIUS;
+const UI_MUTE_BUTTON_X = canvas.width - 2 * BOARD_PADDING / 5 - 3 * UI_TOP_BUTTON_RADIUS;
+const UI_TOP_BUTTON_Y = BOARD_PADDING / 5 + UI_TOP_BUTTON_RADIUS;
 
 // Text constants.
 const TEXT_INSTRUCTIONS = ["There are five colors of blocks.",
@@ -135,8 +135,9 @@ var TEXT_KEYS = ["P: pause",
 if (ALLOW_INCREASE_LEVEL) {
 	TEXT_KEYS.unshift("Z: increase level")
 }
-const TEXT_CREDITS = ["Quintacolor v 0.9.7",
+const TEXT_CREDITS = ["Quintacolor v 0.9.8",
 			     "a game by Tom Quinn (thquinn.github.io)",
+			     "sound by Jacob Ruttenberg (jruttenberg.io)",
 			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
 			     "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
 			     "best played in Chrome"];
@@ -167,11 +168,13 @@ const EFFECTS_QUAKE_LIGHT_FADE_SPEED = .01;
 const SFX_LAND_VOLUME_MULTIPLIER = .75;
 const SFX_LAND_SETUP_VOLUME = .066;
 const SFX_BREAK_VOLUME = .2;
-const SFX_STING_MAX_VOL_PIECES = 12;
-const SFX_STING_RATE_FACTOR = .05;
+const SFX_MENU_CLICK_VOLUME = .2;
+const SFX_PATH_VOLUME = .133;
+const SFX_PATH_BACK_VOLUME = .1;
+const SFX_PATH_ERROR_VOLUME = .05;
 const SFX_SCORE_VOLUME = .05;
 const SFX_SCORE_REPETITION = 3;
-const SFX_QUAKE_VOLUME = .25;
+const SFX_QUAKE_VOLUME = .4;
 // 2D HTML5 context setup.
 const ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
@@ -180,25 +183,51 @@ const boardDesaturationCtx = boardDesaturationCanvas.getContext('2d');
 // Asset setup.
 const ASSET_IMAGE_LOGO = document.createElement("img");
 ASSET_IMAGE_LOGO.src = "quintacolor_assets/logo.png";
+var ASSET_SFX_BREAKS = [];
+for (let i = 0; i < 4; i++) {
+	ASSET_SFX_BREAKS.push(new Howl({
+	  src: ['quintacolor_assets/break' + (i + 1) + '.wav']
+	}));
+}
+var ASSET_SFX_BREAK_COMBOS = [];
+for (let i = 0; i < 4; i++) {
+	ASSET_SFX_BREAK_COMBOS.push(new Howl({
+	  src: ['quintacolor_assets/break_combo' + (i + 1) + '.wav']
+	}));
+}
 const ASSET_SFX_LAND = new Howl({
   src: ['quintacolor_assets/land.wav']
 });
-const ASSET_SFX_BREAK = new Howl({
-  src: ['quintacolor_assets/break.wav']
+const ASSET_SFX_MENU_CLICK = new Howl({
+  src: ['quintacolor_assets/menu_click.wav']
 });
-const ASSET_SFX_STING = new Howl({
-  src: ['quintacolor_assets/sting.wav']
+var ASSET_SFX_PATHS = [];
+for (let i = 0; i < COLORS.length; i++) {
+	ASSET_SFX_PATHS.push(new Howl({
+	  src: ['quintacolor_assets/path' + (i + 1) + '.wav']
+	}));
+}
+var ASSET_SFX_PATH_COMBOS = [];
+for (let i = 0; i < COLORS.length; i++) {
+	ASSET_SFX_PATH_COMBOS.push(new Howl({
+	  src: ['quintacolor_assets/path_combo' + (i + 1) + '.wav']
+	}));
+}
+const ASSET_SFX_PATH_BACK = new Howl({
+  src: ['quintacolor_assets/path_back.wav']
 });
-const ASSET_SFX_SCORE = new Howl({
-  src: ['quintacolor_assets/score.wav']
+const ASSET_SFX_PATH_ERROR = new Howl({
+  src: ['quintacolor_assets/path_error.wav']
 });
 const ASSET_SFX_QUAKE = new Howl({
   src: ['quintacolor_assets/quake.wav']
 });
-ASSET_SFX_QUAKE.rate(2);
+const ASSET_SFX_SCORE = new Howl({
+  src: ['quintacolor_assets/score.wav']
+});
 
 // Initialize all game variables.
-let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeSpawnDelay, quakeScreenShake, quakeLightEffect, sfxMap, exampleMatch;
+let clock, state, titleFade, board, keysPressed, keysDown, levelTimer, levelUpForceCooldown, spawnTimer, selected, level, score, scoreAppearance, scorePopup, combo, comboDelay, bonusText, bonusTimer, multiplier, spawnBlocked, gameOverClock, moused, mouseDown, polyomino, polyominoBounty, polyominosScored, showPolyominoTooltip, quakeMeter, quakeMeterAppearance, quakeSpawnDelay, quakeScreenShake, quakeLightEffect, exampleMatch, sfxMap, sfxBreakCycle, sfxPathError;
 function start() {
 	clock = 0;
 	state = StateEnum.TITLE;
@@ -235,8 +264,10 @@ function start() {
 	quakeSpawnDelay = 0;
 	quakeScreenShake = 0;
 	quakeLightEffect = 0;
-	sfxMap = new Map();
 	exampleMatch = null;
+	sfxMap = new Map();
+	sfxBreakCycle = 0;
+	sfxPathError = false;
 }
 
 class Piece {
@@ -326,7 +357,9 @@ class Piece {
 			if (this.fallDistance == 0) {
 				let vol = this.dy * SFX_LAND_VOLUME_MULTIPLIER;
 				this.dy = 0;
-				playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? SFX_LAND_SETUP_VOLUME : vol);
+				if (quakeSpawnDelay == 0) {
+					playSFX(ASSET_SFX_LAND, state == StateEnum.SETUP ? SFX_LAND_SETUP_VOLUME : vol);
+				}
 			}
 		} else {
 			this.dy = 0;
@@ -343,7 +376,7 @@ class Piece {
 				if (nx < 0 || nx >= BOARD_WIDTH || ny < 0 || ny >= BOARD_HEIGHT || board[nx][ny] == null || board[nx][ny].color != this.color) {
 					this.connection[i] = 0;
 				} else if (this.fallDistance > 0 || board[nx][ny].fallDistance > 0) {
-					let iReverse = (i / 2) * 2 + ((i + 1) % 2);
+					let iReverse = Math.floor(i / 2) * 2 + ((i + 1) % 2);
 					this.connection[i] = Math.min(this.connection[i], board[nx][ny].connection[iReverse]);
 				} else {
 					this.connection[i] = Math.min(this.connection[i] + CONNECTION_RATE, 1);
@@ -649,7 +682,9 @@ let effects = new Effects();
 
 function loop() {
 	window.requestAnimationFrame(loop);
-	background.update();
+	if (quakeSpawnDelay == 0) {
+		background.update();
+	}
 	background.draw();
 
 	// Setup.
@@ -666,18 +701,19 @@ function loop() {
 		}
 	}
 
-	// Draw mute button.
+	// Draw top buttons.
 	ctx.textAlign= 'center';
 	ctx.textBaseline = 'middle';
 	ctx.fillStyle = "#FFFFFF";
-	ctx.font = "bold " + (UI_MUTE_BUTTON_RADIUS * 1.5) + "px Source Sans Pro";
-	ctx.fillText('\u266B', UI_MUTE_BUTTON_X, UI_MUTE_BUTTON_Y);
+	ctx.font = "bold " + (UI_TOP_BUTTON_RADIUS * 1.5) + "px Source Sans Pro";
+	ctx.fillText(state == StateEnum.PAUSED ? '\u25BA' : '\u275A\u275A', UI_PAUSE_BUTTON_X, UI_TOP_BUTTON_Y);
+	ctx.fillText('\u266B', UI_MUTE_BUTTON_X, UI_TOP_BUTTON_Y);
 	if (localStorage.mute == 'true') {
 		ctx.strokeStyle = '#E00000';
 		ctx.lineWidth = PIECE_SIZE / 20;
 		ctx.beginPath();
-		ctx.arc(UI_MUTE_BUTTON_X, UI_MUTE_BUTTON_Y, UI_MUTE_BUTTON_RADIUS, .25 * Math.PI, 2.25 * Math.PI, false);
-		ctx.lineTo(UI_MUTE_BUTTON_X - Math.sqrt(2) / 2 * UI_MUTE_BUTTON_RADIUS, UI_MUTE_BUTTON_Y - Math.sqrt(2) / 2 * UI_MUTE_BUTTON_RADIUS);
+		ctx.arc(UI_MUTE_BUTTON_X, UI_TOP_BUTTON_Y, UI_TOP_BUTTON_RADIUS, .25 * Math.PI, 2.25 * Math.PI, false);
+		ctx.lineTo(UI_MUTE_BUTTON_X - Math.sqrt(2) / 2 * UI_TOP_BUTTON_RADIUS, UI_TOP_BUTTON_Y - Math.sqrt(2) / 2 * UI_TOP_BUTTON_RADIUS);
 		ctx.stroke();
 	}
 
@@ -692,361 +728,370 @@ function loop() {
 		ctx.font = "bold " + (UI_SCORE_FONT_SIZE * 2) + "px Source Sans Pro";
 		ctx.fillText("PAUSED", canvas.width / 2, canvas.height / 2);
 		keysPressed.clear();
-		return;
 	}
 
-	// Mute check.
-	if (keysPressed.has(KeyBindings.MUTE)) {
-		localStorage.mute = localStorage.mute == 'true' ? 'false' : 'true';
-	}
+	if (state != StateEnum.PAUSED) {
+		// Mute check.
+		if (keysPressed.has(KeyBindings.MUTE)) {
+			localStorage.mute = localStorage.mute == 'true' ? 'false' : 'true';
+		}
 
-	// Game over check.
-	if (state == StateEnum.RUNNING) {
-		spawnBlocked = true;
-		let gameOver = true;
-		for (let x = 0; x < BOARD_WIDTH; x++) {
-			if (board[x][0] == null) {
-				spawnBlocked = false;
-			}
-			if (board[x][0] == null || board[x][0].fallDistance > 0) {
-				gameOver = false;
-			}
-		}
-		if (gameOver) {
-			selected = [];
-			quakeMeter = 0;
-			state = StateEnum.GAME_OVER;
-			if (localStorage.highScore == null || localStorage.highScore < score) {
-				localStorage.highScore = score;
-			}
-		}
-	}
-
-	// Quake?
-	if (quakeMeter < quakeMeterAppearance) {
-		quakeMeterAppearance = quakeMeter * .067 + quakeMeterAppearance * .933;
-	}
-	if (state == StateEnum.RUNNING && QUAKE_METER && keysPressed.has(KeyBindings.QUAKE)) {
-		if (quakeMeter >= quakeMeterSize) {
-			quake();
-		} else if (DEBUG_MODE) {
-			quakeMeter = quakeMeterSize;
-			quakeMeterAppearance = quakeMeterSize;
-		}
-	}
-	// Update pieces.	
-	if (state == StateEnum.SETUP || state == StateEnum.RUNNING) {
-		for (let x = 0; x < BOARD_WIDTH; x++) {
-			for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
-				if (board[x][y] == null) {
-					continue;
+		// Game over check.
+		if (state == StateEnum.RUNNING) {
+			spawnBlocked = true;
+			let gameOver = true;
+			for (let x = 0; x < BOARD_WIDTH; x++) {
+				if (board[x][0] == null) {
+					spawnBlocked = false;
 				}
-				board[x][y].update(state == StateEnum.SETUP);
+				if (board[x][0] == null || board[x][0].fallDistance > 0) {
+					gameOver = false;
+				}
+			}
+			if (gameOver) {
+				selected = [];
+				quakeMeter = 0;
+				state = StateEnum.GAME_OVER;
+				if (localStorage.highScore == null || localStorage.highScore < score) {
+					localStorage.highScore = score;
+				}
 			}
 		}
-	}
-	// Update everything else.
-	bonusTimer = Math.max(0, bonusTimer - 1);
-	comboDelay = Math.max(0, comboDelay - 1);
-	if (comboDelay == 0) {
-		combo = 0;
-		if (scorePopup > 0) {
-			let drainAmount = Math.max(Math.round(scorePopup * UI_SCORE_POPUP_DRAIN_PERCENT), UI_SCORE_POPUP_DRAIN_MIN);
-			drainAmount = Math.min(scorePopup, drainAmount);
-			scorePopup -= drainAmount;
-			scoreAppearance += drainAmount;
-			if (clock % SFX_SCORE_REPETITION == 0) {
-				playSFX(ASSET_SFX_SCORE, SFX_SCORE_VOLUME);
+
+		// Quake?
+		if (quakeMeter < quakeMeterAppearance) {
+			quakeMeterAppearance = quakeMeter * .067 + quakeMeterAppearance * .933;
+		}
+		if (state == StateEnum.RUNNING && QUAKE_METER && keysPressed.has(KeyBindings.QUAKE)) {
+			if (quakeMeter >= quakeMeterSize) {
+				quake();
+			} else if (DEBUG_MODE) {
+				quakeMeter = quakeMeterSize;
+				quakeMeterAppearance = quakeMeterSize;
 			}
 		}
-	}
-	if (state == StateEnum.RUNNING) {
-		// Level up.
-		if (levelUpForceCooldown > 0) {
-			levelUpForceCooldown--;
+		// Update pieces.	
+		if (state == StateEnum.SETUP || state == StateEnum.RUNNING) {
+			for (let x = 0; x < BOARD_WIDTH; x++) {
+				for (let y = BOARD_HEIGHT - 1; y >= 0; y--) {
+					if (board[x][y] == null) {
+						continue;
+					}
+					board[x][y].update(state == StateEnum.SETUP);
+				}
+			}
 		}
-		levelTimer--;
-		if (levelTimer == 0) {
-			level++;
-			multiplier += MULTIPLIER_INCREMENT;
-			levelTimer = LEVEL_RATE;
-		} else if (ALLOW_INCREASE_LEVEL && keysPressed.has(KeyBindings.INCREASE_LEVEL) && levelUpForceCooldown == 0) {
-			level++;
-			let add = Math.precisionRound(Math.lerp(MULTIPLIER_INCREMENT, MULTIPLIER_FORCE_INCREMENT, levelTimer / LEVEL_RATE), 2);
-			multiplier = Math.precisionRound(multiplier + add, 2);
-			levelUpForceCooldown = LEVEL_UP_FORCE_COOLDOWN;
-			levelTimer = LEVEL_RATE;
+		// Update everything else.
+		let comboMin = quakeSpawnDelay > 0 ? 1 : 0;
+		if (bonusTimer > comboMin) {
+			bonusTimer--;
 		}
-		// Spawn pieces.
-		if (spawnTimer <= 0) {
-			if (!spawnBlocked) {
-				new Piece();
-				let rate = SPAWN_RATE_INITIAL + Math.pow((level - 1) * SPAWN_RATE_INCREMENT, SPAWN_RATE_INCREMENT_EXPONENT);
-				if (SPAWN_RATE_SCALE_WITH_VACANCY) {
-					let count = 0;
-					for (let x = 0; x < BOARD_WIDTH; x++) {
-						for (let y = 0; y < BOARD_HEIGHT; y++) {
-							if (board[x][y] != null) {
-								count += BOARD_HEIGHT - y;
-								break;
+		let comboDecay = 1;
+		if (selected.length > 1 && !pathHasDuplicateColor()) {
+			comboDecay -= selected.length / COLORS.length * COMBO_FUDGE_FACTOR;
+		}
+		if (comboDelay > comboMin) {
+			comboDelay = Math.max(comboMin, comboDelay - comboDecay);
+		}
+		if (comboDelay == 0) {
+			combo = 0;
+			if (scorePopup > 0) {
+				let drainAmount = Math.max(Math.round(scorePopup * UI_SCORE_POPUP_DRAIN_PERCENT), UI_SCORE_POPUP_DRAIN_MIN);
+				drainAmount = Math.min(scorePopup, drainAmount);
+				scorePopup -= drainAmount;
+				scoreAppearance += drainAmount;
+				if (clock % SFX_SCORE_REPETITION == 0) {
+					playSFX(ASSET_SFX_SCORE, SFX_SCORE_VOLUME);
+				}
+			}
+		}
+		if (state == StateEnum.RUNNING) {
+			// Level up.
+			if (levelUpForceCooldown > 0) {
+				levelUpForceCooldown--;
+			}
+			if (quakeSpawnDelay == 0) {
+				levelTimer--;
+			}
+			if (levelTimer == 0) {
+				level++;
+				multiplier += MULTIPLIER_INCREMENT;
+				levelTimer = LEVEL_RATE;
+			} else if (ALLOW_INCREASE_LEVEL && keysPressed.has(KeyBindings.INCREASE_LEVEL) && levelUpForceCooldown == 0) {
+				level++;
+				let add = Math.precisionRound(Math.lerp(MULTIPLIER_INCREMENT, MULTIPLIER_FORCE_INCREMENT, levelTimer / LEVEL_RATE), 2);
+				multiplier = Math.precisionRound(multiplier + add, 2);
+				levelUpForceCooldown = LEVEL_UP_FORCE_COOLDOWN;
+				levelTimer = LEVEL_RATE;
+			}
+			// Spawn pieces.
+			if (spawnTimer <= 0) {
+				if (!spawnBlocked) {
+					new Piece();
+					let rate = SPAWN_RATE_INITIAL + Math.pow((level - 1) * SPAWN_RATE_INCREMENT, SPAWN_RATE_INCREMENT_EXPONENT);
+					if (SPAWN_RATE_SCALE_WITH_VACANCY) {
+						let count = 0;
+						for (let x = 0; x < BOARD_WIDTH; x++) {
+							for (let y = 0; y < BOARD_HEIGHT; y++) {
+								if (board[x][y] != null) {
+									count += BOARD_HEIGHT - y;
+									break;
+								}
 							}
 						}
+						let percentFull = count / (BOARD_WIDTH * BOARD_HEIGHT);
+						if (percentFull < .5) {
+							let lerpValue = (.5 - percentFull) * 2;
+							let rateMultiplier = Math.lerp(1, SPAWN_RATE_SCALING_MAX, lerpValue);
+							rate *= rateMultiplier;
+						}
 					}
-					let percentFull = count / (BOARD_WIDTH * BOARD_HEIGHT);
-					if (percentFull < .5) {
-						let rateMultiplier = Math.min(.5 / percentFull, 4);
-						rate *= rateMultiplier;
-					}
+					spawnTimer += 60 / rate;
 				}
-				spawnTimer += 60 / rate;
+			} else if (quakeSpawnDelay > 0) {
+				quakeSpawnDelay--;
+			} else {
+				spawnTimer--;
 			}
-		} else if (quakeSpawnDelay > 0) {
-			quakeSpawnDelay--;
-		} else {
-			spawnTimer--;
 		}
-	}
-	
-	// Draw pieces.
-	boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
-	for (let x = 0; x < BOARD_WIDTH; x++) {
-		let pingpongX = x % 2 == 0 ? x / 2 : BOARD_WIDTH - (x + 1) / 2;
-		for (let y = 0; y < BOARD_HEIGHT; y++) {
-			if (board[pingpongX][y] == null) {
-				continue;
+		
+		// Draw pieces.
+		boardCtx.clearRect(0, 0, boardCanvas.width, boardCanvas.height);
+		for (let x = 0; x < BOARD_WIDTH; x++) {
+			let pingpongX = x % 2 == 0 ? x / 2 : BOARD_WIDTH - (x + 1) / 2;
+			for (let y = 0; y < BOARD_HEIGHT; y++) {
+				if (board[pingpongX][y] == null) {
+					continue;
+				}
+				board[pingpongX][y].draw();
 			}
-			board[pingpongX][y].draw();
 		}
-	}
-	// Draw board.
-	if (state == StateEnum.GAME_OVER) {
-		// Create board mask. We could avoid the second canvas by using ctx.filter = saturate, but mobile Safari doesn't support it.
-		boardDesaturationCtx.clearRect(0, 0, boardDesaturationCanvas.width, boardDesaturationCanvas.height);
-		boardDesaturationCtx.drawImage(boardCanvas, 0, 0);
-		// Desaturate.
-		let alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
-		boardCtx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
-		boardCtx.globalCompositeOperation = 'saturation';
-		boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
-		// Apply board mask.
-		boardCtx.globalCompositeOperation = 'destination-in';
-		boardCtx.drawImage(boardDesaturationCanvas, 0, 0);
-		boardCtx.globalCompositeOperation = 'source-over';
-	}
-	let screenShakeX = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
-	let screenShakeY = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
-	quakeScreenShake = Math.max(0, quakeScreenShake - EFFECTS_QUAKE_FADE_SPEED);
-	ctx.drawImage(boardCanvas, BOARD_PADDING + screenShakeX, screenShakeY);
-	// Draw base.
-	let baseY = BOARD_HEIGHT * PIECE_SIZE;
-	ctx.fillStyle = BASE_COLOR;
-	ctx.fillRect(BOARD_PADDING + screenShakeX, baseY + screenShakeY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY + EFFECTS_QUAKE_STRENGTH);
-	// Draw selection path.
-	let pathColor = '#FFFFFF';
-	if (selected.length > 1) {
-		let selectedColors = new Set();
-		for (let i = 0; i < selected.length; i++) {
-			let color = board[selected[i][0]][selected[i][1]].color;
-			if (selectedColors.has(color)) {
+		// Draw board.
+		if (state == StateEnum.GAME_OVER) {
+			// Create board mask. We could avoid the second canvas by using ctx.filter = saturate, but mobile Safari doesn't support it.
+			boardDesaturationCtx.clearRect(0, 0, boardDesaturationCanvas.width, boardDesaturationCanvas.height);
+			boardDesaturationCtx.drawImage(boardCanvas, 0, 0);
+			// Desaturate.
+			let alpha = Math.min(gameOverClock / UI_GAME_OVER_FADE_TIME, 1) * BOARD_GAME_OVER_DESATURATION;
+			boardCtx.fillStyle = "rgba(0, 0, 0, " + alpha + ")";
+			boardCtx.globalCompositeOperation = 'saturation';
+			boardCtx.fillRect(0, 0, boardCanvas.width, boardCanvas.height);
+			// Apply board mask.
+			boardCtx.globalCompositeOperation = 'destination-in';
+			boardCtx.drawImage(boardDesaturationCanvas, 0, 0);
+			boardCtx.globalCompositeOperation = 'source-over';
+		}
+		let screenShakeX = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
+		let screenShakeY = Math.randFloat(-1, 1) * EFFECTS_QUAKE_STRENGTH * quakeScreenShake;
+		quakeScreenShake = Math.max(0, quakeScreenShake - EFFECTS_QUAKE_FADE_SPEED);
+		ctx.drawImage(boardCanvas, BOARD_PADDING + screenShakeX, screenShakeY);
+		// Draw base.
+		let baseY = BOARD_HEIGHT * PIECE_SIZE;
+		ctx.fillStyle = BASE_COLOR;
+		ctx.fillRect(BOARD_PADDING + screenShakeX, baseY + screenShakeY, BOARD_WIDTH * PIECE_SIZE, canvas.height - baseY + EFFECTS_QUAKE_STRENGTH);
+		// Draw selection path.
+		let pathColor = '#FFFFFF';
+		if (selected.length > 1) {
+			if (pathHasDuplicateColor()) {
 				pathColor = SELECTION_INVALID_COLOR;
-				break;
 			}
-			selectedColors.add(color);
-		}
-		ctx.strokeStyle = pathColor;
-		ctx.lineWidth = STROKE_WIDTH;
-		ctx.beginPath();
-		let x, y;
-		for (let i = 0; i < selected.length; i++) {
-			x = BOARD_PADDING + (selected[i][0] + .5) * PIECE_SIZE;
-			y = (selected[i][1] + .5) * PIECE_SIZE;
-			i == 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-		}
-		ctx.stroke();
-		if (selected.length == COLORS.length) {
-			ctx.fillStyle = pathColor;
+			ctx.strokeStyle = pathColor;
+			ctx.lineWidth = STROKE_WIDTH;
 			ctx.beginPath();
-			ctx.arc(x, y, SELECTION_END_RADIUS, 0, 2 * Math.PI, false);
-			ctx.fill();
+			let x, y;
+			for (let i = 0; i < selected.length; i++) {
+				x = BOARD_PADDING + (selected[i][0] + .5) * PIECE_SIZE;
+				y = (selected[i][1] + .5) * PIECE_SIZE;
+				i == 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+			}
+			ctx.stroke();
+			if (selected.length == COLORS.length) {
+				ctx.fillStyle = pathColor;
+				ctx.beginPath();
+				ctx.arc(x, y, SELECTION_END_RADIUS, 0, 2 * Math.PI, false);
+				ctx.fill();
+			}
 		}
-	}
-	// Draw UI.
-	ctx.textAlign = 'right';
-	ctx.textBaseline = 'middle';
-	ctx.fillStyle = "#FFFFFF";
-	ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
-	ctx.fillText(scoreAppearance, canvas.width - BOARD_PADDING, canvas.height / 2);
-	let leadingZeroes = Math.max(0, UI_SCORE_DIGITS - scoreAppearance.toString().length);
-	let scoreWidth = ctx.measureText(scoreAppearance).width;
-	ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
-	ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
-	if (scorePopup > 0) {
-		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-		ctx.fillText("+" + scorePopup, canvas.width - BOARD_PADDING, canvas.height * .5625);
-	}
-	if (bonusTimer > 0) {
-		ctx.fillStyle = (clock % (UI_BONUS_FLASH_FRAMES * 2)) < UI_BONUS_FLASH_FRAMES ? "#FFFFFF": "#E9E9F9";
-		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
-		ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .6);	
-	}
-	let levelPercent = levelTimer / LEVEL_RATE;
-	ctx.beginPath();
-	ctx.arc(UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y, UI_LEVEL_CIRCLE_RADIUS, Math.PI * 1.5, Math.PI * (1.5 - 2 * levelPercent), true);
-	ctx.lineTo(UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y);
-	ctx.fillStyle = "rgba(255, 255, 255, .5)";
-	ctx.fill();
-	ctx.textAlign = 'center';
-	ctx.fillStyle = "#9090F0";
-	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-	ctx.fillText("Level", UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y - UI_LEVEL_CIRCLE_RADIUS * .4);
-	ctx.fillText("Multiplier", UI_LEVEL_CIRCLE_X - UI_LEVEL_CIRCLE_RADIUS * 3, UI_LEVEL_CIRCLE_Y - UI_LEVEL_CIRCLE_RADIUS * .4);
-	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
-	ctx.fillText(level, UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y + UI_LEVEL_CIRCLE_RADIUS * .175);
-	ctx.fillText(Math.round(multiplier * 100) + '%', UI_LEVEL_CIRCLE_X - UI_LEVEL_CIRCLE_RADIUS * 3, UI_LEVEL_CIRCLE_Y + UI_LEVEL_CIRCLE_RADIUS * .175);
-	if (BOUNTY_POLYOMINOS) {
-		drawPolyominoUI();
-	}
-	if (QUAKE_METER) {
-		ctx.fillStyle = UI_QUAKE_METER_EMPTY_COLOR;
-		ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH, UI_QUAKE_METER_HEIGHT);
-		let p = perspective(BOARD_WIDTH * (1 - UI_QUAKE_METER_WIDTH_PERCENT) / 2, (UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) / PIECE_SIZE);
-		p[1] = Math.abs(p[1]);
-		ctx.fillStyle = BASE_SIDE_COLOR;
-		ctx.beginPath();
-		ctx.moveTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
-		ctx.closePath();
-		ctx.fill();
-		ctx.beginPath();
-		ctx.moveTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
-		ctx.closePath();
-		ctx.fill();
-		ctx.fillStyle = BASE_BOTTOM_COLOR;
-		ctx.beginPath();
-		ctx.moveTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
-		ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
-		ctx.closePath();
-		ctx.fill();
-		let fillPercent = quakeMeterAppearance / quakeMeterSize;
-		if (fillPercent > 0) {
-			ctx.fillStyle = UI_QUAKE_METER_FULL_COLOR;
-			ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * fillPercent, UI_QUAKE_METER_HEIGHT);
-			let glow = PIECE_SIZE * (quakeMeter == quakeMeterSize ? Math.sin(clock / 25) * .05 + .1 : .04);
-			ctx.filter = 'blur(' + glow + 'px)';
-			ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * (quakeMeterAppearance / quakeMeterSize), UI_QUAKE_METER_HEIGHT);
-			ctx.filter = 'none';
-		}
-		if (quakeMeter == quakeMeterSize) {
-			ctx.textAlign = 'center';
-			ctx.textBaseline = 'middle';
-			ctx.fillStyle = '#DFDFFF';
-			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 4) + "px Source Sans Pro";
-			ctx.fillText('click here or press SPACE to settle the board', UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH / 2, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2);
-		}
-	}
-	// Draw example match.
-	if (score == 0 && clock > UI_EXAMPLE_MATCH_DELAY && selected.length == 0) {
-		if (exampleMatch == null) {
-			exampleMatch = findRandomMatch(board, COLORS.length);
-		}
-		let alpha = Math.min((clock - UI_EXAMPLE_MATCH_DELAY) / 100, 1);
-		ctx.strokeStyle = "rgba(255, 255, 255, " + alpha + ")";
-		ctx.lineWidth = STROKE_WIDTH / 2;
-		ctx.setLineDash([PIECE_SIZE / 10, PIECE_SIZE / 4]);
-		ctx.beginPath();
-		ctx.moveTo(BOARD_PADDING + (exampleMatch[0][0] + .5) * PIECE_SIZE, (exampleMatch[0][1] + .5) * PIECE_SIZE);
-		for (let i = 1; i < exampleMatch.length; i++) {
-			ctx.lineTo(BOARD_PADDING + (exampleMatch[i][0] + .5) * PIECE_SIZE, (exampleMatch[i][1] + .5) * PIECE_SIZE);
-		}
-		ctx.stroke();
-		ctx.setLineDash([]);
-	}
-	if (state == StateEnum.GAME_OVER) {
-		ctx.textAlign= 'right';
-		ctx.textBaseline = 'alphabetic';
-		ctx.fillStyle = "rgba(155, 90, 110, " + (gameOverClock / UI_GAME_OVER_FADE_TIME) + ")";
-		ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
-		ctx.fillText("GAME OVER", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
-		let gameOverWidth = ctx.measureText("GAME OVER").width;
-		ctx.textBaseline = 'top';
-		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
-		ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
-		ctx.textAlign= 'left';
-		ctx.fillText("your high score: " + parseInt(localStorage.highScore).toLocaleString(), canvas.width - BOARD_PADDING - gameOverWidth, canvas.height - BOARD_PADDING);
-	}
-	// Draw quake light effect.
-	if (quakeLightEffect > 0) {
-		// Fullscreen flash.
-		let fullscreenAlpha = Math.max(0, (quakeLightEffect - .9) * 10);
-		if (fullscreenAlpha > 0) {
-			ctx.fillStyle = "rgba(255, 255, 255, " + fullscreenAlpha + ")";
-			ctx.fillRect(0, 0, canvas.width, canvas.height);
-		}
-		// Gradient.
-		var gradient = ctx.createLinearGradient(0, canvas.height, 0, -canvas.height * .25);
-		var gradientAlpha = quakeLightEffect * (clock % 2 == 0 ? 1.5 : 1);
-		gradient.addColorStop(0, 'rgba(255,255,255, ' + gradientAlpha + ')');
-		gradient.addColorStop(1, 'rgba(255,255,255,0)');
-		ctx.fillStyle = gradient;
-		ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY, UI_QUAKE_METER_WIDTH, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
-		// Diminish.
-		quakeLightEffect = Math.max(0, quakeLightEffect - EFFECTS_QUAKE_LIGHT_FADE_SPEED);
-	}
-	// Draw effects.
-	effects.update();
-	effects.draw();
-
-	// Draw title screen.
-	if (titleFade > 0) {
-		ctx.fillStyle = "rgba(40, 40, 40, " + titleFade + ")";
-		ctx.fillRect(0, 0, canvas.width, canvas.height);
-		if (state != StateEnum.TITLE) {
-			titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
-		}
-		let logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2;
-		ctx.globalAlpha = titleFade;
-		ctx.drawImage(ASSET_IMAGE_LOGO, logoX, canvas.height / 5, UI_TITLE_LOGO_SIZE, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width);
-		ctx.globalAlpha = 1;
-		ctx.textAlign= 'center';
+		// Draw UI.
+		ctx.textAlign = 'right';
 		ctx.textBaseline = 'middle';
-		ctx.fillStyle = "rgba(255, 255, 255, " + titleFade + ")";
-		ctx.font = "200 " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
-		for (let i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
-			ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
+		ctx.fillStyle = "#FFFFFF";
+		ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
+		ctx.fillText(scoreAppearance, canvas.width - BOARD_PADDING, canvas.height / 2);
+		let leadingZeroes = Math.max(0, UI_SCORE_DIGITS - scoreAppearance.toString().length);
+		let scoreWidth = ctx.measureText(scoreAppearance).width;
+		ctx.font = "200 " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
+		ctx.fillText('0'.repeat(leadingZeroes), canvas.width - BOARD_PADDING - scoreWidth, canvas.height / 2);
+		if (scorePopup > 0) {
+			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+			ctx.fillText("+" + scorePopup, canvas.width - BOARD_PADDING, canvas.height * .5625);
 		}
-		ctx.textBaseline = 'alphabetic';
-		ctx.fillStyle = "rgba(128, 128, 128, " + titleFade + ")";
-		ctx.font = (UI_SCORE_FONT_SIZE / 6) + "px Source Sans Pro";
-		ctx.textAlign ='left';
-		for (let i = 0; i < TEXT_KEYS.length; i++) {
-			let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_KEYS.length - i - 1);
-			ctx.fillText(TEXT_KEYS[i], BOARD_PADDING / 2, y);
+		if (bonusTimer > 0) {
+			ctx.fillStyle = (clock % (UI_BONUS_FLASH_FRAMES * 2)) < UI_BONUS_FLASH_FRAMES ? "#FFFFFF": "#E9E9F9";
+			ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+			ctx.fillText(bonusText, canvas.width - BOARD_PADDING, canvas.height * .6);	
 		}
-		ctx.textAlign ='right';
-		for (let i = 0; i < TEXT_CREDITS.length; i++) {
-			let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_CREDITS.length - i - 1);
-			ctx.fillText(TEXT_CREDITS[i], canvas.width - BOARD_PADDING / 2, y);
+		let levelPercent = levelTimer / LEVEL_RATE;
+		ctx.beginPath();
+		ctx.arc(UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y, UI_LEVEL_CIRCLE_RADIUS, Math.PI * 1.5, Math.PI * (1.5 - 2 * levelPercent), true);
+		ctx.lineTo(UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y);
+		ctx.fillStyle = "rgba(255, 255, 255, .5)";
+		ctx.fill();
+		ctx.textAlign = 'center';
+		ctx.fillStyle = UI_TEXT_COLOR;
+		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
+		ctx.fillText("Level", UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y - UI_LEVEL_CIRCLE_RADIUS * .4);
+		ctx.fillText("Multiplier", UI_LEVEL_CIRCLE_X - UI_LEVEL_CIRCLE_RADIUS * 3, UI_LEVEL_CIRCLE_Y - UI_LEVEL_CIRCLE_RADIUS * .4);
+		ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 2) + "px Source Sans Pro";
+		ctx.fillText(level, UI_LEVEL_CIRCLE_X, UI_LEVEL_CIRCLE_Y + UI_LEVEL_CIRCLE_RADIUS * .175);
+		ctx.fillText(Math.round(multiplier * 100) + '%', UI_LEVEL_CIRCLE_X - UI_LEVEL_CIRCLE_RADIUS * 3, UI_LEVEL_CIRCLE_Y + UI_LEVEL_CIRCLE_RADIUS * .175);
+		if (BOUNTY_POLYOMINOS) {
+			drawPolyominoUI();
 		}
-	}
+		if (QUAKE_METER) {
+			ctx.fillStyle = UI_QUAKE_METER_EMPTY_COLOR;
+			ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH, UI_QUAKE_METER_HEIGHT);
+			let p = perspective(BOARD_WIDTH * (1 - UI_QUAKE_METER_WIDTH_PERCENT) / 2, (UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) / PIECE_SIZE);
+			p[1] = Math.abs(p[1]);
+			ctx.fillStyle = BASE_SIDE_COLOR;
+			ctx.beginPath();
+			ctx.moveTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+			ctx.closePath();
+			ctx.fill();
+			ctx.beginPath();
+			ctx.moveTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+			ctx.closePath();
+			ctx.fill();
+			ctx.fillStyle = BASE_BOTTOM_COLOR;
+			ctx.beginPath();
+			ctx.moveTo(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X - UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH + UI_QUAKE_METER_DEPTH * p[0], screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT + UI_QUAKE_METER_DEPTH * p[1]);
+			ctx.lineTo(screenShakeX + UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH, screenShakeY + UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+			ctx.closePath();
+			ctx.fill();
+			let fillPercent = quakeMeterAppearance / quakeMeterSize;
+			if (fillPercent > 0) {
+				ctx.fillStyle = UI_QUAKE_METER_FULL_COLOR;
+				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * fillPercent, UI_QUAKE_METER_HEIGHT);
+				let glow = PIECE_SIZE * (quakeMeter == quakeMeterSize ? Math.sin(clock / 25) * .05 + .1 : .04);
+				ctx.filter = 'blur(' + glow + 'px)';
+				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * (quakeMeterAppearance / quakeMeterSize), UI_QUAKE_METER_HEIGHT);
+				ctx.filter = 'none';
+			}
+			if (quakeMeter == quakeMeterSize) {
+				ctx.textAlign = 'center';
+				ctx.textBaseline = 'middle';
+				ctx.fillStyle = '#DFDFFF';
+				ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 4) + "px Source Sans Pro";
+				ctx.fillText('click here or press SPACE to settle the board', UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH / 2, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT / 2);
+			}
+		}
+		// Draw example match.
+		if (score == 0 && clock > UI_EXAMPLE_MATCH_DELAY && selected.length == 0) {
+			if (exampleMatch == null) {
+				exampleMatch = findRandomMatch(board, COLORS.length);
+			}
+			let alpha = Math.min((clock - UI_EXAMPLE_MATCH_DELAY) / 100, 1);
+			ctx.strokeStyle = "rgba(255, 255, 255, " + alpha + ")";
+			ctx.lineWidth = STROKE_WIDTH / 2;
+			ctx.setLineDash([PIECE_SIZE / 10, PIECE_SIZE / 4]);
+			ctx.beginPath();
+			ctx.moveTo(BOARD_PADDING + (exampleMatch[0][0] + .5) * PIECE_SIZE, (exampleMatch[0][1] + .5) * PIECE_SIZE);
+			for (let i = 1; i < exampleMatch.length; i++) {
+				ctx.lineTo(BOARD_PADDING + (exampleMatch[i][0] + .5) * PIECE_SIZE, (exampleMatch[i][1] + .5) * PIECE_SIZE);
+			}
+			ctx.stroke();
+			ctx.setLineDash([]);
+		}
+		if (state == StateEnum.GAME_OVER) {
+			ctx.textAlign= 'right';
+			ctx.textBaseline = 'alphabetic';
+			ctx.fillStyle = "rgba(155, 90, 110, " + (gameOverClock / UI_GAME_OVER_FADE_TIME) + ")";
+			ctx.font = "bold " + UI_SCORE_FONT_SIZE + "px Source Sans Pro";
+			ctx.fillText("GAME OVER", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+			let gameOverWidth = ctx.measureText("GAME OVER").width;
+			ctx.textBaseline = 'top';
+			ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
+			ctx.fillText("click anywhere to restart", canvas.width - BOARD_PADDING, canvas.height - BOARD_PADDING);
+			ctx.textAlign= 'left';
+			ctx.fillText("your high score: " + parseInt(localStorage.highScore).toLocaleString(), canvas.width - BOARD_PADDING - gameOverWidth, canvas.height - BOARD_PADDING);
+		}
+		// Draw quake light effect.
+		if (quakeLightEffect > 0) {
+			// Fullscreen flash.
+			let fullscreenAlpha = Math.max(0, (quakeLightEffect - .9) * 10);
+			if (fullscreenAlpha > 0) {
+				ctx.fillStyle = "rgba(255, 255, 255, " + fullscreenAlpha + ")";
+				ctx.fillRect(0, 0, canvas.width, canvas.height);
+			}
+			// Gradient.
+			var gradient = ctx.createLinearGradient(0, canvas.height, 0, -canvas.height * .25);
+			var gradientAlpha = quakeLightEffect * (clock % 2 == 0 ? 1.5 : 1);
+			gradient.addColorStop(0, 'rgba(255,255,255, ' + gradientAlpha + ')');
+			gradient.addColorStop(1, 'rgba(255,255,255,0)');
+			ctx.fillStyle = gradient;
+			ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY, UI_QUAKE_METER_WIDTH, UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT);
+			// Diminish.
+			quakeLightEffect = Math.max(0, quakeLightEffect - EFFECTS_QUAKE_LIGHT_FADE_SPEED);
+		}
+		// Draw effects.
+		effects.update();
+		effects.draw();
 
-	if (state != StateEnum.TITLE && state != StateEnum.PAUSED) {
-		clock++;
-	}
-	if (state == StateEnum.GAME_OVER) {
-		gameOverClock++;
+		// Draw title screen.
+		if (titleFade > 0) {
+			ctx.fillStyle = "rgba(40, 40, 40, " + titleFade + ")";
+			ctx.fillRect(0, 0, canvas.width, canvas.height);
+			if (state != StateEnum.TITLE) {
+				titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
+			}
+			let logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2;
+			ctx.globalAlpha = titleFade;
+			ctx.drawImage(ASSET_IMAGE_LOGO, logoX, canvas.height / 5, UI_TITLE_LOGO_SIZE, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width);
+			ctx.globalAlpha = 1;
+			ctx.textAlign= 'center';
+			ctx.textBaseline = 'middle';
+			ctx.fillStyle = "rgba(255, 255, 255, " + titleFade + ")";
+			ctx.font = "200 " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
+			for (let i = 0; i < TEXT_INSTRUCTIONS.length; i++) {
+				ctx.fillText(TEXT_INSTRUCTIONS[i], canvas.width / 2, canvas.height / 2 + UI_SCORE_FONT_SIZE * .5 * i);
+			}
+			ctx.textBaseline = 'alphabetic';
+			ctx.fillStyle = "rgba(128, 128, 128, " + titleFade + ")";
+			ctx.font = (UI_SCORE_FONT_SIZE / 6) + "px Source Sans Pro";
+			ctx.textAlign ='left';
+			for (let i = 0; i < TEXT_KEYS.length; i++) {
+				let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_KEYS.length - i - 1);
+				ctx.fillText(TEXT_KEYS[i], BOARD_PADDING / 2, y);
+			}
+			ctx.textAlign ='right';
+			for (let i = 0; i < TEXT_CREDITS.length; i++) {
+				let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_CREDITS.length - i - 1);
+				ctx.fillText(TEXT_CREDITS[i], canvas.width - BOARD_PADDING / 2, y);
+			}
+		}
+
+		if (state != StateEnum.TITLE && state != StateEnum.PAUSED) {
+			clock++;
+		}
+		if (state == StateEnum.GAME_OVER) {
+			gameOverClock++;
+		}
 	}
 
 	// Play audio.
-	for (let key of sfxMap.keys()) {
-		key.volume(sfxMap.get(key));
-		key.play();
+	if (localStorage.mute != 'true') {
+		for (let key of sfxMap.keys()) {
+			key.volume(sfxMap.get(key));
+			key.play();
+		}
 	}
 
 	// Update key states.
@@ -1074,8 +1119,14 @@ function mouseDownHelper(x, y, rightClick) {
 		state = StateEnum.SETUP;
 		return;
 	}
-	if (Math.hypot(x - UI_MUTE_BUTTON_X, y - UI_MUTE_BUTTON_Y) <= UI_MUTE_BUTTON_RADIUS) {
+	if (Math.hypot(x - UI_PAUSE_BUTTON_X, y - UI_TOP_BUTTON_Y) <= UI_TOP_BUTTON_RADIUS) {
+		keysPressed.add(KeyBindings.PAUSE);
+		playSFX(ASSET_SFX_MENU_CLICK, SFX_MENU_CLICK_VOLUME);
+		return;
+	}
+	if (Math.hypot(x - UI_MUTE_BUTTON_X, y - UI_TOP_BUTTON_Y) <= UI_TOP_BUTTON_RADIUS) {
 		keysPressed.add(KeyBindings.MUTE);
+		playSFX(ASSET_SFX_MENU_CLICK, SFX_MENU_CLICK_VOLUME);
 		return;
 	}
 	if (state == StateEnum.GAME_OVER && gameOverClock >= UI_GAME_OVER_FADE_TIME) {
@@ -1087,6 +1138,7 @@ function mouseDownHelper(x, y, rightClick) {
 	}
 	if (Math.hypot(x - UI_LEVEL_CIRCLE_X, y - UI_LEVEL_CIRCLE_Y) <= UI_LEVEL_CIRCLE_RADIUS) {
 		keysPressed.add(KeyBindings.INCREASE_LEVEL);
+		playSFX(ASSET_SFX_MENU_CLICK, SFX_MENU_CLICK_VOLUME);
 		return;
 	}
 	if (x >= UI_QUAKE_METER_X && x <= UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH && y >= UI_QUAKE_METER_Y && y <= UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) {
@@ -1140,23 +1192,19 @@ function mouseUpHelper() {
 			toDestroy.add(board[selected[i][0]][selected[i][1]].root);
 			piecesDestroyed += board[selected[i][0]][selected[i][1]].root.children.size;
 		}
-		scorePoints(Math.round(piecesDestroyed * 100 * multiplier));
 		// Play sound effects.
-		playSFX(ASSET_SFX_BREAK, SFX_BREAK_VOLUME);
-		let stingStrength = (piecesDestroyed - COLORS.length) / SFX_STING_MAX_VOL_PIECES;
-		if (piecesDestroyed > SFX_STING_MAX_VOL_PIECES) {
-			ASSET_SFX_STING.rate(1 + .1 * (piecesDestroyed - SFX_STING_MAX_VOL_PIECES));
-		} else {
-			ASSET_SFX_STING.rate(1);
-		}
-		playSFX(ASSET_SFX_STING, Math.min(1, stingStrength));
+		let breakSounds = comboDelay > 0 ? ASSET_SFX_BREAK_COMBOS : ASSET_SFX_BREAKS;
+		playSFX(breakSounds[sfxBreakCycle], SFX_BREAK_VOLUME);
+		sfxBreakCycle = (sfxBreakCycle + 1) % breakSounds.length;
 		for (let item of toDestroy) {
 			item.destroy();
 		}
+		scorePoints(Math.round(piecesDestroyed * 100 * multiplier));
 		fallCheck();
 	}
 
 	selected = [];
+	sfxPathError = false;
 	mouseDown = false;
 }
 window.addEventListener('keydown', function(e) {
@@ -1207,8 +1255,12 @@ function selectCheckHelper(x, y) {
 	}
 	let coor = [x, y];
 	let i = Array.containsArray(selected, coor);
-	if (i != -1) {
+	if (i != -1 && i != selected.length - 1) {
 		selected.splice(i + 1);
+		playSFX(ASSET_SFX_PATH_BACK, SFX_PATH_BACK_VOLUME);
+		if (!pathHasDuplicateColor()) {
+			sfxPathError = false;
+		}
 		return;
 	}
 	if (selected.length == COLORS.length) {
@@ -1222,6 +1274,15 @@ function selectCheckHelper(x, y) {
 		}
 	}
 	selected.push([x, y]);
+	if (pathHasDuplicateColor()) {
+		if (!sfxPathError) {
+			playSFX(ASSET_SFX_PATH_ERROR, SFX_PATH_ERROR_VOLUME);
+			sfxPathError = true;
+		}
+	} else {
+		let pathSounds = comboDelay > 0 ? ASSET_SFX_PATH_COMBOS : ASSET_SFX_PATHS;
+		playSFX(pathSounds[selected.length - 1], SFX_PATH_VOLUME);
+	}
 }
 
 function fallCheck() {
@@ -1318,9 +1379,6 @@ function perspective(x, y) {
 }
 
 function playSFX(sfx, volume) {
-	if (localStorage.mute == 'true') {
-		return;
-	}
 	if (!sfxMap.has(sfx)) {
 		sfxMap.set(sfx, volume);
 	} else {
@@ -1368,7 +1426,7 @@ function drawPolyominoUI() {
 					 polyPieceSize * UI_POLYOMINO_BLOCK_FILL);
 	}
 	// Draw polyomino bounty.
-	ctx.fillStyle = "#9090F0";
+	ctx.fillStyle = UI_TEXT_COLOR;
 	ctx.textAlign= 'center';
 	ctx.textBaseline = 'middle';
 	ctx.font = "bold " + (UI_SCORE_FONT_SIZE / 3) + "px Source Sans Pro";
@@ -1376,7 +1434,7 @@ function drawPolyominoUI() {
 										BOARD_PADDING + (polyomino.maxY + 1) / 2 * polyPieceSize - polyPieceSize * (1 - UI_POLYOMINO_BLOCK_FILL) / 2);
 	// Draw polyomino tooltip.
 	if (showPolyominoTooltip) {
-		ctx.fillStyle = "#9090F0";
+		ctx.fillStyle = UI_TEXT_COLOR;
 		ctx.textAlign= 'right';
 		ctx.textBaseline = 'top';
 		ctx.font = (UI_SCORE_FONT_SIZE / 5) + "px Source Sans Pro";
@@ -1385,6 +1443,18 @@ function drawPolyominoUI() {
 		ctx.fillText('be rotated or reflected) to gain this', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5));
 		ctx.fillText('many points, times your multiplier', canvas.width - BOARD_PADDING, tooltipY + (UI_SCORE_FONT_SIZE / 5) * 2);
 	}
+}
+
+function pathHasDuplicateColor() {
+	let selectedColors = new Set();
+	for (let i = 0; i < selected.length; i++) {
+		let color = board[selected[i][0]][selected[i][1]].color;
+		if (selectedColors.has(color)) {
+			return true;
+		}
+		selectedColors.add(color);
+	}
+	return false;
 }
 
 function quake() {
