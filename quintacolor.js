@@ -58,7 +58,7 @@ const QUAKE_ALLOW_WITHOUT_SETTLE = true; // If false, prevents the player from u
 const COMBO_DELAY = 3 * 60; // Players have 3 seconds after making a match to make another and earn a point bonus
 const COMBO_FUDGE_FACTOR = .2; // The combo timer ticks down up to 20% slower depending on how many valid pieces are selected.
 const COMBO_POINTS = 200; // Number of points earned for quick matches, multiplied by the number of quick matches in a row
-const DEBUG_MODE = true; // If enabled, the player can activate quake with an empty meter to fill the meter.
+const DEBUG_MODE = false; // If enabled, the player can activate quake with an empty meter to fill the meter.
 // Board appearance constants.
 const PIECE_SIZE = 60;
 const BOARD_3D = true;
