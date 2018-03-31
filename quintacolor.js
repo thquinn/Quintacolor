@@ -3,10 +3,13 @@
 //		Put in the final sound and music. Use howler's preload.
 //		Final pass on fonts
 //		Call it something other than "settling the board."
-// TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls
+// TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls. Seems more consistent the longer the game has been running
+//		Just switched the meter text to be when the appearance is full vs the actual value. It was happening on the actual value becoming full before... is it now when the meter appears full?
+//		And go fix that inline TODO
 // TODO: Queue up path SFX instead of playing multiple in the same frame. Maybe 2-3 frames between?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
+// TODO: Doesn't work at all in IE!
 // TODO: Wait for assets to load? Depends on load time.
 // TODO: Turn debug mode off
 // TODO: Minify
@@ -43,7 +46,7 @@ const SPAWN_RATE_INITIAL = .75; // pieces spawned per second
 const SPAWN_RATE_INCREMENT = .115; // pieces spawned per second per level
 const SPAWN_RATE_INCREMENT_EXPONENT = .925; // difficulty falloff, lower is easier in the later levels
 const SPAWN_RATE_SCALE_WITH_VACANCY = true; // spawn more pieces the emptier the board is
-const SPAWN_RATE_SCALING_MAX = 5; // multiply the spawn rate by this if the board is completely empty, lerp from half full
+const SPAWN_RATE_SCALING_MAX = 6; // multiply the spawn rate by this if the board is completely empty, lerp from half full
 const MULTIPLIER_INCREMENT = .05; // increase the multiplier by this much when the level increases naturally
 const ALLOW_INCREASE_LEVEL = false; // allow the player to manually increase the level
 const MULTIPLIER_FORCE_INCREMENT = .1; // increase the multiplier by this much when the level is increased manually
@@ -58,7 +61,7 @@ const QUAKE_ALLOW_WITHOUT_SETTLE = true; // If false, prevents the player from u
 const COMBO_DELAY = 3 * 60; // Players have 3 seconds after making a match to make another and earn a point bonus
 const COMBO_FUDGE_FACTOR = .2; // The combo timer ticks down up to 20% slower depending on how many valid pieces are selected.
 const COMBO_POINTS = 200; // Number of points earned for quick matches, multiplied by the number of quick matches in a row
-const DEBUG_MODE = false; // If enabled, the player can activate quake with an empty meter to fill the meter.
+const DEBUG_MODE = true; // If enabled, the player can activate quake with an empty meter to fill the meter.
 // Board appearance constants.
 const PIECE_SIZE = 60;
 const BOARD_3D = true;
@@ -164,6 +167,9 @@ const EFFECTS_QUAKE_STRENGTH = PIECE_SIZE / 10;
 const EFFECTS_QUAKE_FADE_SPEED = .01;
 const EFFECTS_QUAKE_LIGHT_FADE_SPEED = .01;
 // Sound constants.
+const BGM_FADE_RATE = .0125;
+const BGM_TITLE_VOLUME = .5;
+const BGM_GAME_VOLUME = .5;
 const SFX_LAND_VOLUME_MULTIPLIER = .75;
 const SFX_LAND_SETUP_VOLUME = .066;
 const SFX_BREAK_VOLUME = .2;
@@ -182,6 +188,17 @@ const boardDesaturationCtx = boardDesaturationCanvas.getContext('2d');
 // Asset setup.
 const ASSET_IMAGE_LOGO = document.createElement("img");
 ASSET_IMAGE_LOGO.src = "quintacolor_assets/logo.png";
+var ASSET_BGM_TITLE = new Howl({
+  src: ['quintacolor_assets/title.ogg'],
+  volume: BGM_TITLE_VOLUME,
+  loop: true,
+  autoplay: true,
+});
+var ASSET_BGM_GAME = new Howl({
+  src: ['quintacolor_assets/game.ogg'],
+  volume: BGM_GAME_VOLUME,
+  loop: true,
+});
 var ASSET_SFX_BREAKS = [];
 for (let i = 0; i < 4; i++) {
 	ASSET_SFX_BREAKS.push(new Howl({
@@ -195,7 +212,8 @@ for (let i = 0; i < 4; i++) {
 	}));
 }
 const ASSET_SFX_LAND = new Howl({
-  src: ['quintacolor_assets/land.wav']
+  src: ['quintacolor_assets/land.wav'],
+  pool: 20,
 });
 const ASSET_SFX_MENU_CLICK = new Howl({
   src: ['quintacolor_assets/menu_click.wav']
@@ -219,7 +237,8 @@ const ASSET_SFX_PATH_ERROR = new Howl({
   src: ['quintacolor_assets/path_error.wav']
 });
 const ASSET_SFX_QUAKE = new Howl({
-  src: ['quintacolor_assets/quake.wav']
+  src: ['quintacolor_assets/quake.wav'],
+  pool: 1,
 });
 const ASSET_SFX_SCORE = new Howl({
   src: ['quintacolor_assets/score.wav']
@@ -680,6 +699,36 @@ class Sparkle {
 let effects = new Effects();
 
 function loop() {
+	// Update music.
+	let titleVol = ASSET_BGM_TITLE.volume(), gameVol = ASSET_BGM_GAME.volume();
+	if (state == StateEnum.TITLE) {
+		if (!ASSET_BGM_TITLE.playing()) {
+			ASSET_BGM_TITLE.play();
+		}
+		if (titleVol < BGM_TITLE_VOLUME) {
+			ASSET_BGM_TITLE.volume(Math.min(BGM_TITLE_VOLUME, titleVol + BGM_FADE_RATE));
+		}
+		if (gameVol > 0) {
+			ASSET_BGM_GAME.volume(Math.max(0, gameVol - BGM_FADE_RATE));
+			if (ASSET_BGM_GAME.volume() == 0) {
+				ASSET_BGM_GAME.pause();
+			}
+		}
+	} else {
+		if (!ASSET_BGM_GAME.playing()) {
+			ASSET_BGM_GAME.play();
+		}
+		if (gameVol < BGM_GAME_VOLUME) {
+			ASSET_BGM_GAME.volume(Math.min(BGM_GAME_VOLUME, gameVol + BGM_FADE_RATE));
+		}
+		if (titleVol > 0) {
+			ASSET_BGM_TITLE.volume(Math.max(0, titleVol - BGM_FADE_RATE));
+			if (ASSET_BGM_TITLE.volume() == 0) {
+				ASSET_BGM_TITLE.stop();
+			}
+		}
+	}
+
 	window.requestAnimationFrame(loop);
 	if (quakeSpawnDelay == 0) {
 		background.update();
@@ -719,6 +768,7 @@ function loop() {
 	// Pause check.
 	if (keysPressed.has(KeyBindings.PAUSE) && (state == StateEnum.RUNNING || state == StateEnum.PAUSED)) {
 		state = state == StateEnum.RUNNING ? StateEnum.PAUSED : StateEnum.RUNNING;
+		Howler.volume(state == StateEnum.RUNNING ? 1.0 : 0.25);
 	}
 	if (state == StateEnum.PAUSED) {
 		ctx.textAlign= 'center';
@@ -984,7 +1034,7 @@ function loop() {
 				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * (quakeMeterAppearance / quakeMeterSize), UI_QUAKE_METER_HEIGHT);
 				ctx.filter = 'none';
 			}
-			if (quakeMeter == quakeMeterSize) {
+			if (Math.abs(quakeMeterAppearance - quakeMeterSize) < .001) { // TODO: Change this back to quakeMeter == quakeMeterSize
 				ctx.textAlign = 'center';
 				ctx.textBaseline = 'middle';
 				ctx.fillStyle = '#DFDFFF';
