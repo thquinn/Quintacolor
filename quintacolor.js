@@ -1,18 +1,14 @@
 // TODO: Final polish!
+//		Bump the logo in time with the music if unmuted
 // 		Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
-//		Put in the final sound and music. Use howler's preload.
 //		Final pass on fonts
-//		Call it something other than "settling the board."
 // TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls. Seems more consistent the longer the game has been running
 //		Just switched the meter text to be when the appearance is full vs the actual value. It was happening on the actual value becoming full before... is it now when the meter appears full?
 //		And go fix that inline TODO
-// TODO: Queue up path SFX instead of playing multiple in the same frame. Maybe 2-3 frames between?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
-// TODO: Doesn't work at all in IE!
-// TODO: Wait for assets to load? Depends on load time.
 // TODO: Turn debug mode off
-// TODO: Minify
+// TODO: Minify with Babel, make sure it works in IE
 // TODO: Back to Rawgit
 
 // KNOWN BUG: Text alignment is messed up in Firefox. Could maybe be fixed by using different baselines.
@@ -87,7 +83,7 @@ const SELECTION_INVALID_COLOR = '#FFD0D0';
 const BOARD_GAME_OVER_DESATURATION = .95;
 const UI_WIDTH = PIECE_SIZE * 8;
 // Canvas setup.
-const canvas = document.getElementById('canvas');
+const canvas = document.getElementById('gameCanvas');
 canvas.width = BOARD_WIDTH * PIECE_SIZE + 2 * BOARD_PADDING + UI_WIDTH;
 canvas.height = BOARD_HEIGHT * PIECE_SIZE + BOARD_PADDING;
 const boardCanvas = document.createElement('canvas');
@@ -172,7 +168,7 @@ const BGM_TITLE_VOLUME = .5;
 const BGM_GAME_VOLUME = .5;
 const SFX_LAND_VOLUME_MULTIPLIER = .75;
 const SFX_LAND_SETUP_VOLUME = .066;
-const SFX_BREAK_VOLUME = .2;
+const SFX_BREAK_VOLUME = .3;
 const SFX_MENU_CLICK_VOLUME = .2;
 const SFX_PATH_VOLUME = .133;
 const SFX_PATH_BACK_VOLUME = .1;
@@ -768,7 +764,6 @@ function loop() {
 	// Pause check.
 	if (keysPressed.has(KeyBindings.PAUSE) && (state == StateEnum.RUNNING || state == StateEnum.PAUSED)) {
 		state = state == StateEnum.RUNNING ? StateEnum.PAUSED : StateEnum.RUNNING;
-		Howler.volume(state == StateEnum.RUNNING ? 1.0 : 0.25);
 	}
 	if (state == StateEnum.PAUSED) {
 		ctx.textAlign= 'center';
@@ -849,7 +844,7 @@ function loop() {
 				drainAmount = Math.min(scorePopup, drainAmount);
 				scorePopup -= drainAmount;
 				scoreAppearance += drainAmount;
-				if (clock % SFX_SCORE_REPETITION == 0) {
+				if (clock % SFX_SCORE_REPETITION == 0 && state != StateEnum.GAME_OVER) {
 					playSFX(ASSET_SFX_SCORE, SFX_SCORE_VOLUME);
 				}
 			}
@@ -1136,11 +1131,16 @@ function loop() {
 	}
 
 	// Play audio.
-	if (localStorage.mute != 'true') {
-		for (let key of sfxMap.keys()) {
-			key.volume(sfxMap.get(key));
-			key.play();
-		}
+	if (localStorage.mute == 'true') {
+		Howler.volume(0);
+	} else if (state == StateEnum.PAUSED) {
+		Howler.volume(.25);
+	} else {
+		Howler.volume(1);
+	}
+	for (let key of sfxMap.keys()) {
+		key.volume(sfxMap.get(key));
+		key.play();
 	}
 
 	// Update key states.
