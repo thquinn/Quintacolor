@@ -1,10 +1,10 @@
 // TODO: Final polish!
-//		Bump the logo in time with the music if unmuted
 // 		Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
 //		Final pass on fonts
 // TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls. Seems more consistent the longer the game has been running
 //		Just switched the meter text to be when the appearance is full vs the actual value. It was happening on the actual value becoming full before... is it now when the meter appears full?
 //		And go fix that inline TODO
+// TODO: Music not working on mobile?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 // TODO: Combine SFX into a single wav, use Howler's "audio sprites"
 // TODO: Turn debug mode off
@@ -31,7 +31,7 @@ const KeyBindings = {
 const COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 const BOARD_WIDTH = 15;
 const BOARD_HEIGHT = 12;
-const SETUP_ROWS = 6; // number of rows filled at the start of the game
+const SETUP_ROWS = 11; // number of rows filled at the start of the game
 const SETUP_NO_CONNECTIONS = true; // guarantee that no two adjacent setup row pieces will be the same color
 const COLUMN_SELECTION_CHANCE_TO_WEIGHT = .8; // chance that we weight towards dropping pieces in emptier columns
 const COLOR_SELECTION_CHANCE_TO_WEIGHT = .66; // chance that we weight towards colors absent from the board
@@ -57,7 +57,7 @@ const QUAKE_ALLOW_WITHOUT_SETTLE = true; // If false, prevents the player from u
 const COMBO_DELAY = 3 * 60; // Players have 3 seconds after making a match to make another and earn a point bonus
 const COMBO_FUDGE_FACTOR = .2; // The combo timer ticks down up to 20% slower depending on how many valid pieces are selected.
 const COMBO_POINTS = 200; // Number of points earned for quick matches, multiplied by the number of quick matches in a row
-const DEBUG_MODE = true; // If enabled, the player can activate quake with an empty meter to fill the meter.
+const DEBUG_MODE = false; // If enabled, the player can activate quake with an empty meter to fill the meter.
 // Board appearance constants.
 const PIECE_SIZE = 60;
 const BOARD_3D = true;
@@ -94,6 +94,7 @@ boardDesaturationCanvas.width = boardCanvas.width;
 boardDesaturationCanvas.height = boardCanvas.height;
 // UI constants.
 const UI_TITLE_LOGO_SIZE = canvas.width * 2 / 3;
+const UI_TITLE_LOGO_BUMP = .033;
 const UI_TITLE_FADE_RATE = .025;
 const UI_TEXT_COLOR = "#76a1d9";
 const UI_SCORE_DIGITS = 10;
@@ -133,7 +134,7 @@ var TEXT_KEYS = ["P: pause",
 if (ALLOW_INCREASE_LEVEL) {
 	TEXT_KEYS.unshift("Z: increase level")
 }
-const TEXT_CREDITS = ["Quintacolor v 0.9.8",
+const TEXT_CREDITS = ["Quintacolor v 0.9.9",
 			     "a game by Tom Quinn (thquinn.github.io)",
 			     "sound by Jacob Ruttenberg (jruttenberg.io)",
 			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
@@ -169,6 +170,8 @@ const BGM_GAME_VOLUME = .5;
 const SFX_LAND_VOLUME_MULTIPLIER = .75;
 const SFX_LAND_SETUP_VOLUME = .066;
 const SFX_BREAK_VOLUME = .3;
+const SFX_GAME_START_VOLUME = .33;
+const SFX_GAME_OVER_VOLUME = .5;
 const SFX_MENU_CLICK_VOLUME = .2;
 const SFX_PATH_VOLUME = .133;
 const SFX_PATH_BACK_VOLUME = .1;
@@ -207,6 +210,18 @@ for (let i = 0; i < 4; i++) {
 	  src: ['quintacolor_assets/break_combo' + (i + 1) + '.wav']
 	}));
 }
+const ASSET_SFX_GAME_START = new Howl({
+  src: ['quintacolor_assets/game_start.wav'],
+  pool: 1,
+  volume: SFX_GAME_START_VOLUME,
+  onend: function() {
+  	ASSET_BGM_GAME.play();
+  }
+});
+const ASSET_SFX_GAME_OVER = new Howl({
+  src: ['quintacolor_assets/game_over.wav'],
+  pool: 1,
+});
 const ASSET_SFX_LAND = new Howl({
   src: ['quintacolor_assets/land.wav'],
   pool: 20,
@@ -696,33 +711,8 @@ let effects = new Effects();
 
 function loop() {
 	// Update music.
-	let titleVol = ASSET_BGM_TITLE.volume(), gameVol = ASSET_BGM_GAME.volume();
-	if (state == StateEnum.TITLE) {
-		if (!ASSET_BGM_TITLE.playing()) {
-			ASSET_BGM_TITLE.play();
-		}
-		if (titleVol < BGM_TITLE_VOLUME) {
-			ASSET_BGM_TITLE.volume(Math.min(BGM_TITLE_VOLUME, titleVol + BGM_FADE_RATE));
-		}
-		if (gameVol > 0) {
-			ASSET_BGM_GAME.volume(Math.max(0, gameVol - BGM_FADE_RATE));
-			if (ASSET_BGM_GAME.volume() == 0) {
-				ASSET_BGM_GAME.pause();
-			}
-		}
-	} else {
-		if (!ASSET_BGM_GAME.playing()) {
-			ASSET_BGM_GAME.play();
-		}
-		if (gameVol < BGM_GAME_VOLUME) {
-			ASSET_BGM_GAME.volume(Math.min(BGM_GAME_VOLUME, gameVol + BGM_FADE_RATE));
-		}
-		if (titleVol > 0) {
-			ASSET_BGM_TITLE.volume(Math.max(0, titleVol - BGM_FADE_RATE));
-			if (ASSET_BGM_TITLE.volume() == 0) {
-				ASSET_BGM_TITLE.stop();
-			}
-		}
+	if (state == StateEnum.TITLE && !ASSET_BGM_TITLE.playing()) {
+		ASSET_BGM_TITLE.play();
 	}
 
 	window.requestAnimationFrame(loop);
@@ -796,6 +786,8 @@ function loop() {
 				selected = [];
 				quakeMeter = 0;
 				state = StateEnum.GAME_OVER;
+				playSFX(ASSET_SFX_GAME_OVER, SFX_GAME_OVER_VOLUME);
+				ASSET_BGM_GAME.stop();
 				if (localStorage.highScore == null || localStorage.highScore < score) {
 					localStorage.highScore = score;
 				}
@@ -1096,9 +1088,20 @@ function loop() {
 			if (state != StateEnum.TITLE) {
 				titleFade = Math.max(0, titleFade - UI_TITLE_FADE_RATE);	
 			}
-			let logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2;
+
+			let logoScale = 1;
+			let logoMeasure = ASSET_BGM_TITLE.seek() / .5;
+			let beatPause = (logoMeasure > 12.5 && logoMeasure < 15.5) || (logoMeasure > 47.5 && logoMeasure < 51.5) || logoMeasure > 77.5;
+			if (localStorage.mute != 'true' && !beatPause) {
+				let logoBeat = (ASSET_BGM_TITLE.seek() + .075) % .5 * 2;
+				logoScale = Math.sin(logoBeat * 2 * Math.PI) / 2 + .5;
+				logoScale = Math.pow(logoScale, 10);
+				logoScale = 1 + logoScale * UI_TITLE_LOGO_BUMP;
+			}
+			let logoX = canvas.width / 2 - UI_TITLE_LOGO_SIZE / 2 - UI_TITLE_LOGO_SIZE * (logoScale - 1) / 2;
+			let logoY = canvas.height / 5 - UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width * (logoScale - 1);
 			ctx.globalAlpha = titleFade;
-			ctx.drawImage(ASSET_IMAGE_LOGO, logoX, canvas.height / 5, UI_TITLE_LOGO_SIZE, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width);
+			ctx.drawImage(ASSET_IMAGE_LOGO, logoX, logoY, UI_TITLE_LOGO_SIZE * logoScale, UI_TITLE_LOGO_SIZE * ASSET_IMAGE_LOGO.height / ASSET_IMAGE_LOGO.width * logoScale);
 			ctx.globalAlpha = 1;
 			ctx.textAlign= 'center';
 			ctx.textBaseline = 'middle';
@@ -1166,6 +1169,8 @@ function mouseDownHelper(x, y, rightClick) {
 	}
 	if (state == StateEnum.TITLE) {
 		state = StateEnum.SETUP;
+		ASSET_BGM_TITLE.stop();
+		ASSET_SFX_GAME_START.play();
 		return;
 	}
 	if (Math.hypot(x - UI_PAUSE_BUTTON_X, y - UI_TOP_BUTTON_Y) <= UI_TOP_BUTTON_RADIUS) {
@@ -1187,7 +1192,9 @@ function mouseDownHelper(x, y, rightClick) {
 	}
 	if (Math.hypot(x - UI_LEVEL_CIRCLE_X, y - UI_LEVEL_CIRCLE_Y) <= UI_LEVEL_CIRCLE_RADIUS) {
 		keysPressed.add(KeyBindings.INCREASE_LEVEL);
-		playSFX(ASSET_SFX_MENU_CLICK, SFX_MENU_CLICK_VOLUME);
+		if (ALLOW_INCREASE_LEVEL) {
+			playSFX(ASSET_SFX_MENU_CLICK, SFX_MENU_CLICK_VOLUME);
+		}
 		return;
 	}
 	if (x >= UI_QUAKE_METER_X && x <= UI_QUAKE_METER_X + UI_QUAKE_METER_WIDTH && y >= UI_QUAKE_METER_Y && y <= UI_QUAKE_METER_Y + UI_QUAKE_METER_HEIGHT) {
