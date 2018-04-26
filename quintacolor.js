@@ -1,15 +1,9 @@
-// TODO: Final polish!
-// 		Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
-//		Final pass on fonts
+// TODO: Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
 // TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls. Seems more consistent the longer the game has been running
 //		Just switched the meter text to be when the appearance is full vs the actual value. It was happening on the actual value becoming full before... is it now when the meter appears full?
 //		And go fix that inline TODO
 // TODO: Music not working on mobile?
 // TODO: Fix bad mouse events vs page interaction on mobile.
-// TODO: Combine SFX into a single wav, use Howler's "audio sprites"
-// TODO: Turn debug mode off
-// TODO: Minify with Babel, make sure it works in IE
-// TODO: Back to Rawgit
 
 // KNOWN BUG: Text alignment is messed up in Firefox. Could maybe be fixed by using different baselines.
 
@@ -31,7 +25,7 @@ const KeyBindings = {
 const COLORS = ['#FF7979', '#90D4FF', '#FFEA5E', '#6CFF77', '#BC9BFF'];
 const BOARD_WIDTH = 15;
 const BOARD_HEIGHT = 12;
-const SETUP_ROWS = 11; // number of rows filled at the start of the game
+const SETUP_ROWS = 6; // number of rows filled at the start of the game
 const SETUP_NO_CONNECTIONS = true; // guarantee that no two adjacent setup row pieces will be the same color
 const COLUMN_SELECTION_CHANCE_TO_WEIGHT = .8; // chance that we weight towards dropping pieces in emptier columns
 const COLOR_SELECTION_CHANCE_TO_WEIGHT = .66; // chance that we weight towards colors absent from the board
@@ -134,12 +128,12 @@ var TEXT_KEYS = ["P: pause",
 if (ALLOW_INCREASE_LEVEL) {
 	TEXT_KEYS.unshift("Z: increase level")
 }
-const TEXT_CREDITS = ["Quintacolor v 0.9.9",
-			     "a game by Tom Quinn (thquinn.github.io)",
-			     "sound by Jacob Ruttenberg (jruttenberg.io)",
-			     "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
-			     "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
-			     "best played in Chrome"];
+const TEXT_CREDITS = ["Quintacolor v 1.0",
+				      "a game by Tom Quinn (thquinn.github.io)",
+				      "sound by Jacob Ruttenberg (jruttenberg.io)",
+				      "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
+				      "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
+				      "best played in Chrome"];
 // Background appearance.
 const BACKGROUND_COLOR = "#C3DCF0";
 const BACKGROUND_TILT = Math.PI * .05;
@@ -170,7 +164,7 @@ const BGM_GAME_VOLUME = .5;
 const SFX_LAND_VOLUME_MULTIPLIER = .75;
 const SFX_LAND_SETUP_VOLUME = .066;
 const SFX_BREAK_VOLUME = .3;
-const SFX_GAME_START_VOLUME = .33;
+const SFX_GAME_START_VOLUME = .15;
 const SFX_GAME_OVER_VOLUME = .5;
 const SFX_MENU_CLICK_VOLUME = .2;
 const SFX_PATH_VOLUME = .133;
