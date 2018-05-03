@@ -1,7 +1,3 @@
-// TODO: Bad performance on crappy machines... test using pixi canvas, or sprites instead of drawRect?
-// TODO: Show highscore on title screen.
-// TODO: If the player would lose, has quake, and quake would save them, auto-use quake
-
 // TODO: Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
 // TODO: Music not working on mobile?
 // TODO: Fix bad mouse events vs page interaction on mobile.
@@ -793,18 +789,6 @@ function loop() {
 			}
 		}
 
-		// Quake?
-		if (quakeMeter < quakeMeterAppearance) {
-			quakeMeterAppearance = quakeMeter * .067 + quakeMeterAppearance * .933;
-		}
-		if (state == StateEnum.RUNNING && QUAKE_METER && keysPressed.has(KeyBindings.QUAKE)) {
-			if (quakeMeter >= quakeMeterSize) {
-				quake();
-			} else if (DEBUG_MODE) {
-				quakeMeter = quakeMeterSize;
-				quakeMeterAppearance = quakeMeterSize;
-			}
-		}
 		// Update pieces.	
 		if (state == StateEnum.SETUP || state == StateEnum.RUNNING) {
 			for (let x = 0; x < BOARD_WIDTH; x++) {
@@ -861,7 +845,20 @@ function loop() {
 			}
 			// Spawn pieces.
 			if (spawnTimer <= 0) {
-				if (!spawnBlocked) {
+				let headSpace = 0;
+				for (let x = 0; x < BOARD_WIDTH; x++) {
+					for (let y = 0; y < BOARD_HEIGHT; y++) {
+						if (board[x][y] == null) {
+							headSpace++;
+						} else {
+							break;
+						}
+					}
+				}
+				if (headSpace == 1 && quakeMeter == quakeMeterSize) {
+					keysPressed.add(KeyBindings.QUAKE);
+					spawnTimer = .001;
+				} else if (!spawnBlocked) {
 					new Piece();
 					let rate = SPAWN_RATE_INITIAL + Math.pow((level - 1) * SPAWN_RATE_INCREMENT, SPAWN_RATE_INCREMENT_EXPONENT);
 					if (SPAWN_RATE_SCALE_WITH_VACANCY) {
@@ -887,6 +884,19 @@ function loop() {
 				quakeSpawnDelay--;
 			} else {
 				spawnTimer--;
+			}
+		}
+
+		// Quake?
+		if (quakeMeter < quakeMeterAppearance) {
+			quakeMeterAppearance = quakeMeter * .067 + quakeMeterAppearance * .933;
+		}
+		if (state == StateEnum.RUNNING && QUAKE_METER && keysPressed.has(KeyBindings.QUAKE)) {
+			if (quakeMeter >= quakeMeterSize) {
+				quake();
+			} else if (DEBUG_MODE) {
+				quakeMeter = quakeMeterSize;
+				quakeMeterAppearance = quakeMeterSize;
 			}
 		}
 		
@@ -1014,10 +1024,9 @@ function loop() {
 			let fillPercent = quakeMeterAppearance / quakeMeterSize;
 			if (fillPercent > 0) {
 				ctx.fillStyle = UI_QUAKE_METER_FULL_COLOR;
-				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * fillPercent, UI_QUAKE_METER_HEIGHT);
 				let glow = PIECE_SIZE * (quakeMeter == quakeMeterSize ? Math.sin(clock / 25) * .05 + .1 : .04);
 				ctx.shadowBlur = glow;
-				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * (quakeMeterAppearance / quakeMeterSize), UI_QUAKE_METER_HEIGHT);
+				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * fillPercent, UI_QUAKE_METER_HEIGHT);
 				ctx.shadowBlur = 0;
 			}
 			if (quakeMeter == quakeMeterSize) {
@@ -1118,9 +1127,16 @@ function loop() {
 				ctx.fillText(TEXT_KEYS[i], BOARD_PADDING / 2, y);
 			}
 			ctx.textAlign ='right';
-			for (let i = 0; i < TEXT_CREDITS.length; i++) {
-				let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (TEXT_CREDITS.length - i - 1);
-				ctx.fillText(TEXT_CREDITS[i], canvas.width - BOARD_PADDING / 2, y);
+			let textCreditsLength = localStorage.highScore == null ? TEXT_CREDITS.length : TEXT_CREDITS.length + 1;
+			for (let i = 0; i < textCreditsLength; i++) {
+				let text;
+				if (i == TEXT_CREDITS.length) {
+					text = "your high score: " + parseInt(localStorage.highScore).toLocaleString();
+				} else {
+					text = TEXT_CREDITS[i];
+				}
+				let y = canvas.height - BOARD_PADDING / 2 - (UI_SCORE_FONT_SIZE / 6) * (textCreditsLength - i - 1);
+				ctx.fillText(text, canvas.width - BOARD_PADDING / 2, y);
 			}
 		}
 
