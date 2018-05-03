@@ -1,7 +1,8 @@
+// TODO: Bad performance on crappy machines... test using pixi canvas, or sprites instead of drawRect?
+// TODO: Show highscore on title screen.
+// TODO: If the player would lose, has quake, and quake would save them, auto-use quake
+
 // TODO: Improve the vanishes for the new 3D look. Cube shape? Delaunay triangulation? (https://github.com/mapbox/delaunator)
-// TODO: Still sometimes lagging HARD the first time the meter becomes full. Why?! We're continuously making blur calls. Seems more consistent the longer the game has been running
-//		Just switched the meter text to be when the appearance is full vs the actual value. It was happening on the actual value becoming full before... is it now when the meter appears full?
-//		And go fix that inline TODO
 // TODO: Music not working on mobile?
 // TODO: Fix bad mouse events vs page interaction on mobile.
 
@@ -128,8 +129,8 @@ var TEXT_KEYS = ["P: pause",
 if (ALLOW_INCREASE_LEVEL) {
 	TEXT_KEYS.unshift("Z: increase level")
 }
-const TEXT_CREDITS = ["Quintacolor v 1.0",
-				      "a game by Tom Quinn (thquinn.github.io)",
+const TEXT_CREDITS = ["Quintacolor v 1.0.1",
+				      "by Tom Quinn (thquinn.github.io)",
 				      "sound by Jacob Ruttenberg (jruttenberg.io)",
 				      "fonts Gilgongo and Source Sans Pro by Apostrophic Labs and Paul D. Hunt, respectively",
 				      "thanks to Arthee, Chet, Jay, Jonny, Maggie, San, and Tanoy",
@@ -176,6 +177,7 @@ const SFX_QUAKE_VOLUME = .4;
 // 2D HTML5 context setup.
 const ctx = canvas.getContext('2d');
 ctx.lineCap = "square";
+ctx.shadowColor = UI_QUAKE_METER_FULL_COLOR;
 const boardCtx = boardCanvas.getContext('2d');
 const boardDesaturationCtx = boardDesaturationCanvas.getContext('2d');
 // Asset setup.
@@ -708,6 +710,9 @@ function loop() {
 	if (state == StateEnum.TITLE && !ASSET_BGM_TITLE.playing()) {
 		ASSET_BGM_TITLE.play();
 	}
+	if (state != StateEnum.TITLE && ASSET_BGM_TITLE.playing()) {
+		ASSET_BGM_TITLE.stop();
+	}
 
 	window.requestAnimationFrame(loop);
 	if (quakeSpawnDelay == 0) {
@@ -745,6 +750,10 @@ function loop() {
 		ctx.stroke();
 	}
 
+	// Mute check.
+	if (keysPressed.has(KeyBindings.MUTE)) {
+		localStorage.mute = localStorage.mute == 'true' ? 'false' : 'true';
+	}
 	// Pause check.
 	if (keysPressed.has(KeyBindings.PAUSE) && (state == StateEnum.RUNNING || state == StateEnum.PAUSED)) {
 		state = state == StateEnum.RUNNING ? StateEnum.PAUSED : StateEnum.RUNNING;
@@ -759,11 +768,6 @@ function loop() {
 	}
 
 	if (state != StateEnum.PAUSED) {
-		// Mute check.
-		if (keysPressed.has(KeyBindings.MUTE)) {
-			localStorage.mute = localStorage.mute == 'true' ? 'false' : 'true';
-		}
-
 		// Game over check.
 		if (state == StateEnum.RUNNING) {
 			spawnBlocked = true;
@@ -776,6 +780,7 @@ function loop() {
 					gameOver = false;
 				}
 			}
+			// Game over.
 			if (gameOver) {
 				selected = [];
 				quakeMeter = 0;
@@ -1011,11 +1016,11 @@ function loop() {
 				ctx.fillStyle = UI_QUAKE_METER_FULL_COLOR;
 				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * fillPercent, UI_QUAKE_METER_HEIGHT);
 				let glow = PIECE_SIZE * (quakeMeter == quakeMeterSize ? Math.sin(clock / 25) * .05 + .1 : .04);
-				ctx.filter = 'blur(' + glow + 'px)';
+				ctx.shadowBlur = glow;
 				ctx.fillRect(screenShakeX + UI_QUAKE_METER_X, screenShakeY + UI_QUAKE_METER_Y, UI_QUAKE_METER_WIDTH * (quakeMeterAppearance / quakeMeterSize), UI_QUAKE_METER_HEIGHT);
-				ctx.filter = 'none';
+				ctx.shadowBlur = 0;
 			}
-			if (Math.abs(quakeMeterAppearance - quakeMeterSize) < .001) { // TODO: Change this back to quakeMeter == quakeMeterSize
+			if (quakeMeter == quakeMeterSize) {
 				ctx.textAlign = 'center';
 				ctx.textBaseline = 'middle';
 				ctx.fillStyle = '#DFDFFF';
